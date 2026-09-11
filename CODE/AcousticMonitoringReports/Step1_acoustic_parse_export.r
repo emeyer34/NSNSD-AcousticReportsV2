@@ -1,6 +1,6 @@
 #########################################################################
 #
-#  Step2_AcousticReport_ParseExport.R
+#  Step1_acoustic_parse_export.R
 #
 #  Purpose:
 #    Replaces Step2_AcousticReport_HTML_DataExplore.Rmd. No HTML report is
@@ -36,13 +36,13 @@
 ## 0. CONFIG
 ## ---------------------------------------------------------------------
 
-plottitle    <- FALSE   # Produce titles on plots?
+plottitle    <- TRUE   # Produce titles on plots?
 plotHRDBA    <- TRUE   # Produce hourly dBA plot?
 plotTRUNCDBA <- TRUE   # Produce truncated hourly dBA plot?
 plotFREQDBA  <- TRUE   # Produce frequency dBA plot?
 plotCONTOUR  <- TRUE   # Produce contour plot?
 
-yMaxHr <- 60   # upper limit, hourly graphs (multiple of 3)
+yMaxHr <- 70   # upper limit, hourly graphs (multiple of 3)
 yMinHr <- 5    # lower limit, hourly graphs (multiple of 3)
 yMaxHz <- 70   # upper limit, frequency graphs (multiple of 3)
 yMinHz <- -12  # lower limit, frequency graphs (multiple of 3)

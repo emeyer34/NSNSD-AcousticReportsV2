@@ -33,7 +33,7 @@ params:
     choices: ["Yes", "No"]
     input: select
   append3: 
-    label: "Include Listening Center Detailed Graphs Appendix?"
+    label: "Include Listening Center and/or SPLAT Detailed Graphs Appendix?"
     value: "Yes"
     choices: ["Yes", "No"]
     input: select  

@@ -917,7 +917,7 @@ for (i in 1:length(datafolders)) {
   # caption style that's guaranteed to apply.
   styled_block("sr Table caption",
     "Table ", amb_sum_tab_list[[i]], ". Summary of sound levels at ", 
-    park, " (", pcode, ") in ", seasons[[i]], ", ", years[[i]], 
+    park, " (", pcode, ") in ", tolower(seasons[[i]]), ", ", years[[i]], 
     ". Included for each site, 90^th^ percentile (L~A10~), existing (L~A50~), natural (L~Anat~) and 10^th^ percentile (L~A90~) ambient sound levels (dB re 20 µPa, A-weighted broadband, 12.5 Hz—20 kHz) during the day (0700-1900) and night (1900-0700)."
   )
   cat("\n") # Additional line breaks for clarity
@@ -985,7 +985,7 @@ for (i in 1:length(datafolders)) {
   styled_block("sr Table caption",
     "Table ", ta_tab_list_1[[i]], 
     ". Percent time above metrics for acoustic records collected in ", 
-    park, " (", pcode, ") in ", seasons[[i]], ", ", years[[i]], 
+    park, " (", pcode, ") in ", tolower(seasons[[i]]), ", ", years[[i]], 
     ". Sound level functional values (in decibels, dB LAeq, 1s re 20 µPa) are shown as the percent of time ANS-weighted sound levels (20–1,250 Hz) and the full measured frequency range (12.5–20,000 Hz) are above those functional values."
   )
   
@@ -1025,19 +1025,20 @@ To determine the effect that noise has on the acoustic environment, it is useful
 freqpngfiles <- frecontlist
 imagename <- basename(freqpngfiles)
 figsites <- sub("_.*", "", imagename)
-figseasons <- sub("^[^_]*_([^_]*)_.*$", "\\1", imagename)
+# Lowercased at extraction, since figseasons is always used mid-sentence
+# in the caption below ("... at SITE in summer, YEAR."), never at the
+# start of a sentence.
+figseasons <- tolower(sub("^[^_]*_([^_]*)_.*$", "\\1", imagename))
 figyears<- sub(".*_(\\d{4})/.*$", "\\1", freqpngfiles)
 
 total_figures <- length(freqpngfiles)
 
 # Loop through each frequency PNG file with an index.
-# NOTE ON STYLING: each caption/credit/alt-text block below is wrapped in
-# the SAME Pandoc fenced-div syntax used successfully elsewhere in this
-# document (via the styled_block() helper defined in the "packages"
-# chunk), instead of a plain-text "please format this by hand" reminder.
-# This should apply the correct Word paragraph style automatically on
-# knit - please verify against your first render before relying on it in
-# place of your cleanup macros.
+# NOTE: Image credit and Alternate text blocks were REMOVED here per
+# request - this is a snapshot report, not the final comprehensive
+# report, and those elements were judged unnecessary for this document.
+# Only the figure caption (via styled_block(), same Pandoc custom-style
+# mechanism as elsewhere in this document) is retained.
 for (i in 1:total_figures) {
   f <- freqpngfiles[i]
 
@@ -1047,14 +1048,6 @@ for (i in 1:total_figures) {
     "Figure ", frecont_fig_list[[i]], ". Day and night percentile sound pressure levels for 33 one-third octave bands at ",
     figsites[i], " in ", figseasons[i], ", ", figyears[i],
     ". For each bar, the bold color indicates the range of existing (L~50~; upper) and natural (L~nat~; lower) sound pressure levels."
-  )
-
-  styled_block("sr Image credit", "NPS / NATURAL SOUNDS AND NIGHT SKIES DIVISION")
-
-  styled_block("sr Alternate text",
-    "Figure ", frecont_fig_list[[i]], ". Day and night percentile sound pressure levels for 33 one-third octave bands at ",
-    figsites[i], " in ", figseasons[i], ", ", figyears[i],
-    ". This graph displays sound pressure level in decibels on the y-axis and frequency in hertz on the x-axis. A greyed-out portion of the graph depicts the threshold of human hearing. Octave bands where transportation and songbirds are audible are noted. For each bar that exists for each octave band, measured sound level percentiles are displayed for daytime in yellow-orange and nighttime in pink-purple. The upper and lower bounds of each bar display the tenth and ninetieth percentiles. Within that bar, a bold section (orange and purple) displays the median and natural sound levels. **~This bold color indicates the range of existing and natural sound pressure levels and indicates the measured noise impact. This graph depicts a signal for transportation during the day and a weak signal for dusk and dawn bird chorus.**"
   )
 
   cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
@@ -1079,9 +1072,13 @@ hourpngfiles <- hourlycontlist
 
 imagename <- basename(hourpngfiles)
 figsites <- sub("_.*", "", imagename)
-figseasons <- sub("^[^_]*_([^_]*)_.*$", "\\1", imagename)
+# See note on figseasons in the "freqpng" chunk above re: lowercasing at
+# extraction.
+figseasons <- tolower(sub("^[^_]*_([^_]*)_.*$", "\\1", imagename))
 figyears<- sub(".*_(\\d{4})/.*$", "\\1", hourpngfiles)
 
+# NOTE: Image credit and Alternate text blocks were REMOVED here per
+# request - see identical note in the "freqpng" chunk above.
 for (i in seq_along(hourpngfiles)) {
   f <- hourpngfiles[i]
 
@@ -1090,14 +1087,6 @@ for (i in seq_along(hourpngfiles)) {
   styled_block("sr Figure caption",
     "Figure ", hourly_fig_list[[i]], ". Hourly percentile sound levels (L~Aeq,~~1s~), in dB re 20 µPa, at ",
     figsites[i], " in ", figseasons[i], ", ", figyears[i], "."
-  )
-
-  styled_block("sr Image credit", "NPS / NATURAL SOUNDS AND NIGHT SKIES DIVISION")
-
-  styled_block("sr Alternate text",
-    "Figure ", hourly_fig_list[[i]], ". Hourly percentile sound levels (L~Aeq,~~1s~), in dB re 20 µPa, at ",
-    figsites[i], " in ", figseasons[i], ", ", figyears[i],
-    ". A box and whisker plot depicting percentile sound levels on the y-axis and time of day by the hour on the x-axis. For each hourly box plot, the upper and lower whiskers display the tenth and ninetieth percentiles. The upper bound of the boxplot indicates the median sound level and the lower bound of the boxplot indicates the natural sound level. **This graph shows the largest impacts to the natural ambient sound level occur during the daytime.**"
   )
 
   cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
