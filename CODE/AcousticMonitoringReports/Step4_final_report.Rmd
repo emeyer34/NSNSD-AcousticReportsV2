@@ -1,0 +1,2696 @@
+---
+output: 
+  officedown::rdocx_document:
+    reference_docx: template.docx
+params:
+  alpha_code:
+    label: "Enter 4 letter park code of a new park not in the NPS unit decoder in all caps (UNIT):"
+    value: SAGU
+    input: text
+  offlisten: 
+    label: "Was listening center analysis completed?:"
+    value: "Yes"
+    choices: ["Yes", "No"]
+    input: select
+  splat: 
+    label: "Was SPLAT completed?:"
+    value: "Yes"
+    choices: ["Yes", "No"]
+    input: select
+  onlisten: 
+    label: "Was on site listening completed?:"
+    value: "No"
+    choices: ["Yes", "No"]
+    input: select
+  append1: 
+    label: "Include Site Photos Appendix?"
+    value: "Yes"
+    choices: ["Yes", "No"]
+    input: select
+  append2: 
+    label: "Include Geospatial Model Appendix?"
+    value: "Yes"
+    choices: ["Yes", "No"]
+    input: select
+  append3: 
+    label: "Include Listening Center Detailed Graphs Appendix?"
+    value: "Yes"
+    choices: ["Yes", "No"]
+    input: select  
+  append4:
+    label: "Include Acoustic Trend Graphs Appendix? (requires a 'trends' folder under this park's REPORTS directory, produced by Step 1)"
+    value: "No"
+    choices: ["Yes", "No"]
+    input: select
+  folder_scope:
+    label: "Which season/year folders should this report include?"
+    value: "All available folders"
+    choices: ["All available folders", "Select specific folders (by order number)"]
+    input: select
+  order_list:
+    label: "If 'Select specific folders' above: enter the order number(s) to include, comma-separated (e.g. 1, 3). Ignored if 'All available folders' is selected."
+    value: ""
+    input: text
+  table_grouping:
+    label: "For Time Above / Executive Summary / Percentile tables, when a park has multiple years of data for the same season, should each season/year combination get its own table, or should years be combined into one table per season?"
+    value: "Separate table per season/year (current behavior)"
+    choices: ["Separate table per season/year (current behavior)", "Combine years into one table per season"]
+    input: radio
+--- 
+
+
+```{r packages, include=FALSE}
+# Clear the workspace
+#rm(list=ls())  # Uncomment this line if you want to clear the environment
+
+
+# List of required packages
+packages = c(
+  "EnvStats", "reshape2", "ggplot2", "ggthemes",
+  "pander", "plyr", "lubridate", "readxl", "tcltk",
+  "svDialogs", "tcltk2", "tidyverse", "vtable",
+  "data.table", "ggpubr", "knitr", "readr", 
+  "sjmisc", "janitor", "dplyr", "DT", "tmap", 
+  "scales", "leaflet", "shiny", "rsconnect", 
+  "english", "kableExtra", "statip", "magrittr", 
+  "flextable", "officedown", "officer", "forstringr", 
+  "ftExtra","glue"
+)
+
+# Function to check, install, and load packages
+# Load or install & load all required packages
+lapply(packages, function(pkg) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+    library(pkg, character.only = TRUE)
+  }
+})
+
+# Bring in updated NPS units JSON file
+npsunits <- jsonlite::fromJSON("https://irmaservices.nps.gov/Unit/v2/api/?format=json")
+source("figureList.R")
+
+## NOTE ON OUTPUT ENGINE: this document uses officedown::rdocx_document
+## (see YAML header) rather than plain rmarkdown::word_document. flextable
+## documents that its OOXML output (via flextable_to_rmd(), used for every
+## table in this report) is only fully supported under officedown's
+## renderer - under base word_document, tables can render with the wrong
+## cell fonts/padding/borders and table captions set via
+## set_caption(..., word_stylename=...) may not apply, which matches
+## symptoms seen when this document previously used word_document. This
+## also likely explains why Pandoc image syntax (![alt](path)) was
+## printing its alt text visibly instead of staying hidden as intended -
+## fixed independently below by using empty alt text (![](path)).
+## This has not been verified against an actual render in this
+## environment (no R/pandoc execution available) - please confirm on one
+## report before relying on it.
+
+## -- STYLED LOOP OUTPUT HELPER -------------------------------------------
+## Emits a Pandoc fenced custom-style div from inside a results='asis'
+## chunk/loop: ":::{custom-style=\"X\"} ... :::". This is the SAME syntax
+## already used successfully in the static (non-loop) parts of this
+## document - it just wasn't being used inside cat()-based loops before,
+## which is why table/figure/credit/alt-text styling had to be fixed by
+## hand (or via Word macro) after every knit.
+##
+## Pandoc's fenced-div syntax requires the "::: " markers to each sit on
+## their own line, with a blank line separating divs from surrounding
+## content - that spacing is easy to get right typing Markdown by hand,
+## and easy to get subtly wrong chaining cat() calls, which is the most
+## likely reason this wasn't attempted in loops previously. This helper
+## exists so every loop in this document applies the exact same, correct
+## spacing every time.
+##
+## NOTE: this has not been verified against an actual Word render (no
+## R/pandoc execution available in this environment) - it is the
+## standard, documented way to apply a custom paragraph style from
+## R Markdown to Word via a reference_docx, and mirrors the syntax
+## already working elsewhere in this same document, but please test on
+## one report before retiring your cleanup macros.
+styled_block <- function(style_name, ...) {
+  content <- paste0(..., collapse = "")
+  cat("\n\n:::{custom-style=\"", style_name, "\"}\n", content, "\n:::\n\n", sep = "")
+}
+
+## Extracts the leading "<order>_" number from a folder or file path and
+## returns paths sorted by that number ascending. Used to guarantee
+## every folder-derived list in this report (tables AND figures) is
+## processed in true chronological/order-number sequence, regardless of
+## how the underlying file scan happened to return them.
+##
+## WHY THIS EXISTS: list.files()/list.dirs() sort lexicographically
+## (string comparison), not numerically - "10_Fall_2021" sorts between
+## "1_Summer_2019" and "2_Winter_2020" under plain string sort, since
+## "1" < "1" is a tie and then "0" < "_" ... in practice this means a
+## park with 10+ order-numbered folders can have its later folders
+## appear out of sequence. This was most visible in the SPLAT Event
+## Counts/Lengths tables (built via list.files(..., recursive=TRUE)
+## across multiple folders, where recursive scans across a vector of
+## paths are especially prone to NOT preserving input folder order) but
+## is applied everywhere folder order matters for consistency.
+order_by_folder_num <- function(paths, folder_path_fun = dirname) {
+  if (length(paths) == 0) return(paths)
+  ord <- as.numeric(str_match(basename(folder_path_fun(paths)), "^(\\d+)_")[, 2])
+  paths[order(ord)]
+}
+
+## -- IMAGE ASPECT-RATIO FIX ------------------------------------------------
+## FIXED: every knitr::include_graphics() call in this document that only
+## sets out.width as a percentage (coverimage, genmap, equation, listener)
+## was getting DISTORTED when rendered to Word via officedown. Root cause:
+## knitr computes the rendered image's HEIGHT from the chunk's fig.height
+## option (defaults to 5in when not set, as none of these chunks set it),
+## independent of the source PNG's actual pixel dimensions - so a tall
+## portrait cover photo, a wide landscape site map, and a small equation
+## graphic were all being force-fit into the same fig.width x fig.height
+## box shape, stretching/squishing each one to a different degree.
+##
+## Fix: read each PNG's true pixel width/height directly from its file
+## header (a PNG's IHDR chunk always stores these as fixed-position big-
+## endian 32-bit integers right after the 8-byte file signature - no
+## extra package needed) and pass an explicit, matching out.height
+## alongside out.width, so knitr/officedown can no longer substitute its
+## own unrelated fig.height default.
+##
+## report_content_width_in is an ASSUMPTION about this document's actual
+## printable page width (page width minus left/right margins) in
+## template.docx, needed to convert a percentage like "75%" into real
+## inches. 6.5in is standard for a US Letter page with 1in margins, which
+## is common but may not exactly match this specific template - if your
+## rendered images come out slightly smaller/larger than expected (but
+## no longer distorted), check template.docx's actual margins/page width
+## in Word and adjust this one value accordingly.
+report_content_width_in <- 6.5
+
+get_png_pixel_dims <- function(path) {
+  con <- file(path, "rb")
+  on.exit(close(con))
+  readBin(con, "raw", n = 8)               # PNG file signature (8 bytes) - discarded
+  readBin(con, "raw", n = 4)               # IHDR chunk length (4 bytes) - discarded
+  readBin(con, "raw", n = 4)               # IHDR chunk type, literally "IHDR" - discarded
+  w <- readBin(con, "integer", n = 1, size = 4, endian = "big")
+  h <- readBin(con, "integer", n = 1, size = 4, endian = "big")
+  list(width = w, height = h)
+}
+
+## Drop-in replacement for knitr::include_graphics(path, out.width = "X%")
+## that additionally computes a matching height, preserving the source
+## image's true aspect ratio regardless of chunk fig.height defaults.
+## width_frac is the same fraction previously passed as a percentage
+## string (e.g. 0.75 for the old out.width='75%').
+##
+## FIXED: originally implemented via
+## knitr::include_graphics(path, out.width=..., out.height=...) - but
+## out.height is not accepted as a distinct argument by every installed
+## knitr version ("unused arguments" error). Rewritten to instead emit
+## Pandoc image markdown directly with explicit width=/height= attributes
+## (![](path){width=Xin height=Yin}), which does not depend on knitr's
+## include_graphics() signature at all and matches how every other image
+## in this document is already inserted (via cat("![](path)\n") in the
+## various figure loops). Must be called from a chunk with
+## results='asis' so this raw markdown is emitted into the document
+## rather than printed/escaped as R output - each calling chunk below
+## has been updated accordingly.
+include_graphics_ar <- function(path, width_frac, content_width_in = report_content_width_in) {
+  dims <- tryCatch(get_png_pixel_dims(path), error = function(e) NULL)
+  if (is.null(dims) || is.null(dims$width) || is.null(dims$height) || dims$width <= 0 || dims$height <= 0) {
+    message("Could not read pixel dimensions from: ", path, " - falling back to width-only scaling (aspect ratio not guaranteed).")
+    # FIXED: blank-line isolation (the "\n\n" before/after) makes this
+    # its own standalone block-level image, which is necessary but NOT
+    # sufficient for centering - Pandoc's docx writer does not
+    # auto-center a plain standalone image on its own. fig-align="center"
+    # is Pandoc's documented image-attribute syntax for explicitly
+    # setting a standalone image's paragraph justification in docx
+    # output, added here alongside the existing width attribute.
+    cat(paste0("\n\n![](", path, "){width=", width_frac * content_width_in, "in fig-align=\"center\"}\n\n"))
+    return(invisible(NULL))
+  }
+  out_w_in <- width_frac * content_width_in
+  out_h_in <- out_w_in * (dims$height / dims$width)
+  # FIXED: see fallback-path note above - fig-align="center" added
+  # alongside width/height to actually center the image, which the
+  # earlier blank-line-only fix did not accomplish on its own.
+  cat(paste0("\n\n![](", path, "){width=", out_w_in, "in height=", out_h_in, "in fig-align=\"center\"}\n\n"))
+  invisible(NULL)
+}
+
+```
+
+
+
+
+
+
+```{r params store, include=FALSE}
+# --- Override for line‑by‑line testing (disable when knitting with params) ---
+#pcode <- "ANDE"
+#offlisten    <- "Yes"
+#splat   <-  "No"
+#onlisten   <- "No"
+#include site photo append
+#append1   <-  "Yes"
+#"Include Geospatial Model Appendix?"
+#append2   <- "Yes"
+# "Include Listening Center Detailed Graphs Appendix?
+#append3   <- "Yes"
+#state <- "GA"
+
+# --- Parameters (from RMarkdown params) ---
+pcode <- params$alpha_code
+stopifnot("Park code (alpha_code) must be exactly 4 characters." = nchar(pcode) == 4)
+
+offlisten   <- ifelse(params$offlisten == "Yes", 1, 0)
+offlisten_a <- ifelse(params$offlisten == "Yes", TRUE, FALSE)
+splat       <- ifelse(params$splat     == "Yes", 1, 0)
+splat_a     <- ifelse(params$splat     == "Yes", TRUE, FALSE)
+onlisten    <- ifelse(params$onlisten  == "Yes", 1, 0)
+onlisten_a  <- ifelse(params$onlisten  == "Yes", TRUE, FALSE)
+either_splat_listen <- splat | offlisten
+append1     <- ifelse(params$append1   == "Yes", 1, 0)
+append1a    <- ifelse(params$append1   == "Yes", TRUE, FALSE)
+append2     <- ifelse(params$append2   == "Yes", 1, 0)
+append2a    <- ifelse(params$append2   == "Yes", TRUE, FALSE)
+append3     <- ifelse(params$append3   == "Yes", 1, 0)
+append3a    <- ifelse(params$append3   == "Yes", TRUE, FALSE)
+append4     <- ifelse(params$append4   == "Yes", 1, 0)
+append4a    <- ifelse(params$append4   == "Yes", TRUE, FALSE)
+
+
+# --- Appendix labels (A/B/C/D...) based on parameter selections ---
+# Generalized from a previous hand-nested ifelse() chain that only
+# handled 3 possible appendices (adding a 4th - Trend Graphs - would have
+# required another layer of nesting). Each active appendix gets the next
+# available letter, in the fixed order: Site Photos, GSM, Listening
+# Center Detail, Trend Graphs. This produces identical lettering to the
+# old logic for every combination of the first three appendices.
+appendix_active <- c(spics = append1 == 1, gsm = append2 == 1, lcdet = append3 == 1, trend = append4 == 1)
+# FIXED: rep("", length(appendix_active)) produces an UNNAMED vector -
+# rep() does not carry names over. Indexing that unnamed vector by name
+# below (appendix_letters["spics"], etc.) then silently returned NA
+# instead of "" for any inactive appendix, which made run_logic()'s
+# `if (spics == "A")` fail with "missing value where TRUE/FALSE needed"
+# whenever append1/append2/append3 was "No". setNames() explicitly
+# reattaches the same names appendix_active already has.
+appendix_letters <- setNames(rep("", length(appendix_active)), names(appendix_active))
+appendix_letters[appendix_active] <- LETTERS[seq_len(sum(appendix_active))]
+
+spics        <- unname(appendix_letters["spics"])
+gsm          <- unname(appendix_letters["gsm"])
+lcdet        <- unname(appendix_letters["lcdet"])
+trend_append <- unname(appendix_letters["trend"])
+
+# --- Park metadata ---
+report_units <- npsunits %>% filter(UnitCode == pcode)
+if (nrow(report_units) == 0) {
+  stop("Park code '", pcode, "' was not found in the NPS units list (npsunits). Check for a typo.")
+}
+park  <- report_units$FullName
+state <- report_units$StateCodes
+
+# --- Report directory & season/year folders ---
+report_dir <- paste0("./../..//REPORTS/", pcode)
+dirs <- list.dirs(report_dir)
+dirs <- dirs[grepl("_", dirs)]          # keep folders with Month_YEAR pattern
+dirs <- str_sub(dirs, 3)                # strip leading "./"
+
+if (length(dirs) == 0) {
+  stop("No season/year report folders found under: ", report_dir, ". Has Step 1 been run for this park yet?")
+}
+
+# FIXED: list.dirs() sorts folder paths lexicographically (string
+# comparison), not numerically - a park with 10+ order-numbered season
+# folders would have "10_Fall_2021" sort right after "1_Summer_2019"
+# (before "2_Winter_2020"), since string comparison has no concept of
+# "10" > "2". Every downstream list/table/figure in this report derives
+# its ordering from `dirs`, so sorting numerically by the leading
+# "<order>_" prefix here, once, keeps everything consistent regardless
+# of how many season/year folders a park has accumulated.
+dirs <- dirs[order(as.numeric(str_match(basename(dirs), "^(\\d+)_")[, 2]))]
+
+# --- Folder scope: report on all season/year folders for this park, or
+# just a chosen subset (e.g. a single deployment/season) ---
+# "All available folders" (default) keeps every folder found above.
+# "Select specific folders (by order number)" filters dirs down to just
+# the folder(s) whose leading "<order>_" prefix matches a number you
+# typed into the order_list parameter (e.g. "1, 3").
+#
+# NOTE ON DESIGN: an earlier version of this attempted an interactive
+# GUI checklist (via tcltk) for this purpose. That approach was
+# abandoned because "Knit" runs the document through rmarkdown::render()
+# in a way that does not reliably block on a GUI dialog's event loop -
+# the report was observed to finish rendering before the dialog had even
+# resolved, meaning the filter silently never applied. A plain YAML text
+# parameter has no such timing dependency: it's resolved before the
+# document starts executing at all, exactly like every other parameter
+# in this file (pcode, offlisten, etc).
+if (params$folder_scope == "Select specific folders (by order number)") {
+  requested_orders <- trimws(strsplit(params$order_list, ",")[[1]])
+  requested_orders <- requested_orders[nzchar(requested_orders)]
+
+  if (length(requested_orders) == 0) {
+    message("folder_scope was set to select specific folders, but order_list was left blank - proceeding with ALL available folders instead.")
+  } else {
+    folder_orders <- str_match(basename(dirs), "^(\\d+)_")[, 2]
+    keep <- folder_orders %in% requested_orders
+    matched_orders <- unique(folder_orders[keep])
+    unmatched_orders <- setdiff(requested_orders, matched_orders)
+
+    if (length(unmatched_orders) > 0) {
+      warning("The following requested order number(s) did not match any folder for this park and will be ignored: ",
+              paste(unmatched_orders, collapse = ", "))
+    }
+
+    if (!any(keep)) {
+      message("None of the requested order number(s) (", paste(requested_orders, collapse = ", "),
+              ") matched an existing folder - proceeding with ALL available folders instead.")
+    } else {
+      dirs <- dirs[keep]
+      message("Report will include ", length(dirs), " folder(s) matching order number(s) ",
+              paste(matched_orders, collapse = ", "), ": ", paste(basename(dirs), collapse = ", "))
+    }
+  }
+}
+
+datafolders <- as.list(dirs)
+years <- as.list(sub(".*_", "", dirs))  # extract year from "Month_YEAR"
+years_unique <- as.numeric(unique(years))
+datayear1 <- min(years_unique)          # first year in dataset
+datayear2 <- max(years_unique)          # last year in dataset
+
+daterange <- ifelse(datayear1==datayear2, datayear1, paste(datayear1, " - ", datayear2))
+daterange_text <- ifelse(datayear1==datayear2, paste("in ",datayear1,sep=""), paste("from ", datayear1, " - ", datayear2,sep=""))
+
+
+spell_or_number <- function(x) {
+  if (is.numeric(x) && x %% 1 == 0 && x >= 0 && x <= 9) {
+    format(english::as.english(x))
+  } else {
+    as.character(x)
+  }
+}
+
+
+# Extract season from "REPORTS/<pcode>/<year>_<season>_..."
+seasons <- as.list(str_match(dirs, "REPORTS/..../\\d+_(.*?)_")[, 2])
+season_count <- spell_or_number(length(unlist(seasons)))
+season_countword <- spell_or_number((season_count))
+seasons_unique <- unique(seasons)
+season_s <- ifelse(season_count > 1, "seasons", "season")
+folderlist <- list(datafolders)
+
+# --- Images & metrics paths ---
+# NOTE: this is left pointing at MAPS_IMAGES, matching your existing working
+# setup - flagging only because Step1/Step2 of the current pipeline write
+# SiteMeta.xlsx, cover images, and the site map to <REPORTS>/<pcode>/SitesMeta
+# instead. If MAPS_IMAGES/<pcode> is a folder you maintain/copy into
+# separately (rather than a stale leftover), this is fine as-is - just
+# flagging the discrepancy in case it's not intentional, rather than
+# silently changing a path that currently works for you.
+park.image.folder <- paste("./../..//REPORTS/", pcode,"//SitesMeta//", sep = "")
+
+# --- Load site metadata ONCE here (reused later in the site table chunk),
+# and derive the site list from it rather than from METRICS/*.txt filenames.
+# Deriving sitenames from metrics filenames (the previous approach)
+# overcounts any site with more than one season/year of data, since each
+# season/year produces its own metrics file for that site - SiteMeta.xlsx
+# is inherently one row per site and doesn't have this problem. This
+# mirrors the same fix already applied in Step3 (snapshot report).
+sitemeta_path <- paste0(park.image.folder, "SiteMeta.xlsx")
+if (!file.exists(sitemeta_path)) {
+  stop("SiteMeta.xlsx not found at: ", sitemeta_path, ". Has Step 1's SitesMeta build step been run for this park yet?")
+}
+sitemeta <- read_excel(sitemeta_path)
+
+sitenames <- as.list(sitemeta$Site)
+sitenum <- length(sitenames)
+sitenumword <- spell_or_number((sitenum))
+site_s <- ifelse(sitenum > 1, "sites", "site")
+
+# --- Auto-computed monitoring-period summary (e.g. "57 days across 3
+# sites" or "35 - 57 days across 3 sites"), from SiteMeta.xlsx's Dates
+# column. Ported from Step3 (snapshot report), which already had this;
+# Step4 previously left this as a manual "**~43 to 84 days**" reminder
+# in the Monitoring Period section even though the same underlying data
+# (SiteMeta.xlsx) is already being read for the site table above.
+trim_ws <- function(x) gsub("^\\s+|\\s+$", "", x)
+parse_date_range <- function(x) {
+  if (is.na(x) || !nzchar(x)) return(c(NA, NA))
+  parts <- strsplit(x, "-", fixed = TRUE)[[1]]
+  if (length(parts) != 2) return(c(NA, NA))
+  start_dt <- as.Date(trim_ws(parts[1]), format = "%m/%d/%Y")
+  end_dt   <- as.Date(trim_ws(parts[2]), format = "%m/%d/%Y")
+  c(start_dt, end_dt)
+}
+
+days_summary <- NULL
+if ("Dates" %in% names(sitemeta)) {
+  dsdf <- sitemeta[!is.na(sitemeta$Dates) & nzchar(as.character(sitemeta$Dates)), , drop = FALSE]
+  if (nrow(dsdf) > 0) {
+    parsed <- t(vapply(dsdf$Dates, parse_date_range, FUN.VALUE = c(as.Date(NA), as.Date(NA))))
+    colnames(parsed) <- c("start", "end")
+    dsdf$start <- parsed[, "start"]
+    dsdf$end   <- parsed[, "end"]
+    dsdf <- dsdf[!is.na(dsdf$start) & !is.na(dsdf$end), , drop = FALSE]
+    if (nrow(dsdf) > 0) {
+      dsdf$days_between <- as.integer(dsdf$end - dsdf$start)
+      uniq_sites <- length(unique(dsdf$Site))
+      uniq_days  <- unique(dsdf$days_between)
+      days_summary <- if (length(uniq_days) == 1) {
+        sprintf("%d days across %d sites", uniq_days[1], uniq_sites)
+      } else {
+        sprintf("%d - %d days across %d sites", min(dsdf$days_between, na.rm = TRUE), max(dsdf$days_between, na.rm = TRUE), uniq_sites)
+      }
+    }
+  }
+}
+if (is.null(days_summary)) {
+  message("Could not compute an automatic monitoring-period summary from SiteMeta.xlsx's Dates column - falling back to manual placeholder text in the Monitoring Period section.")
+  days_summary <- "**!-- Reminder:UPDATE DATA (SITE TABLE/DATA SHEETS) --! 43 to 84 days**"
+}
+```
+
+```{r table numbering, include=FALSE}
+# Builds a list of table-group descriptors ({indices, season_label,
+# year_label}) from a given subset of datafolders indices - shared by
+# both the main table_groups (Time Above / Percentile tables, which use
+# ALL folders) and exec_table_groups below (Executive Summary table,
+# which only uses folders that actually have an executivesumtab_*.csv -
+# see has_execsum). season_label is lowercased here at the source
+# (rather than at each caption usage site) since every report sentence
+# that includes it uses it mid-sentence, never at the start.
+build_table_groups <- function(idx) {
+  if (length(idx) == 0) return(list())
+  if (combine_tables_by_season) {
+    seasons_here <- unique(season_vec_all[idx])
+    lapply(seasons_here, function(s) {
+      sub_idx <- idx[season_vec_all[idx] == s]
+      yrs <- sort(unique(as.numeric(year_vec_all[sub_idx])))
+      yr_label <- if (length(yrs) == 1) as.character(yrs) else paste0(min(yrs), " - ", max(yrs))
+      list(indices = sub_idx, season_label = tolower(s), year_label = yr_label)
+    })
+  } else {
+    lapply(idx, function(i) {
+      list(indices = i, season_label = tolower(seasons[[i]]), year_label = years[[i]])
+    })
+  }
+}
+
+# --- Table grouping: controls how many Time Above / Executive Summary /
+# Percentile Levels tables are produced, and what season/year label each
+# one carries.
+#
+# "Separate" (default/previous behavior): one table per folder - i.e.
+# one table per unique season+year combination, exactly as before.
+#
+# "Combine years into one table per season": collapses every folder that
+# shares the same season (e.g. every "Summer" folder, regardless of
+# year) into a SINGLE table, adding a "Year" column to distinguish rows
+# that came from different years, and widening the caption's year label
+# into a range (e.g. "2019 - 2023") when more than one year is present.
+# This keeps the report from growing one full table per season *and*
+# year as multi-year datasets accumulate. If a season only has one
+# year's data, this mode produces output identical to "separate" mode
+# for that season.
+combine_tables_by_season <- params$table_grouping == "Combine years into one table per season"
+
+season_vec_all <- unlist(seasons)
+year_vec_all <- unlist(years)
+
+table_groups <- build_table_groups(seq_along(datafolders))
+n_table_groups <- length(table_groups)
+
+# --- Executive Summary table availability ---
+# executivesumtab_*.csv is only written by Step1 when a season/year
+# folder actually has Listening Center or SPLAT data (eitherfiles ==
+# TRUE there) - a folder with neither is valid and expected (e.g. a
+# season where only base sound level monitoring was done), but has no
+# executive summary data to report. has_execsum identifies which
+# folders actually have the file, so the Executive Summary table (and
+# its numbering/captions) is built only from those, while Time Above and
+# Percentile Levels tables (which don't depend on eitherfiles) still
+# include every folder as before.
+has_execsum <- vapply(seq_along(datafolders), function(i) {
+  file.exists(paste(datafolders[[i]], "/executivesumtab_", seasons[[i]], ".csv", sep = ""))
+}, logical(1))
+
+if (!all(has_execsum)) {
+  message(sum(!has_execsum), " of ", length(has_execsum),
+          " season/year folder(s) do not have an executivesumtab_*.csv (no Listening Center or SPLAT data for that folder/season) - these will be excluded from the Executive Summary table and its underlying narrative statistics, but will still appear in the Time Above and Percentile Levels tables: ",
+          paste(basename(unlist(datafolders)[!has_execsum]), collapse = ", "))
+}
+
+exec_table_groups <- build_table_groups(which(has_execsum))
+n_exec_table_groups <- length(exec_table_groups)
+
+# --- Table numbering (Executive Summary & Main Report) ---
+# Time-above / percentile counts are based on n_table_groups (every
+# folder). The Executive Summary count is based on n_exec_table_groups
+# (only folders with executivesumtab data) - see has_execsum above.
+ta_tab_start_1 <- 2
+ta_tab_end_1 <- n_table_groups - 1 + ta_tab_start_1
+ta_tab_list_1 <- as.list(seq(ta_tab_start_1, ta_tab_end_1, by = 1))
+
+# Executive Summary table
+ex_sum_tab_start <- ta_tab_end_1 + 1
+ex_sum_tab_end <- if (n_exec_table_groups > 0) ex_sum_tab_start + n_exec_table_groups - 1 else ex_sum_tab_start - 1
+ex_sum_tab_list <- if (n_exec_table_groups > 0) as.list(seq(ex_sum_tab_start, ex_sum_tab_end, by = 1)) else list()
+
+# Site metadata table index
+site_meta <- ex_sum_tab_end + 1
+
+# Time-above tables (Main Report)
+ta_tab_start_2 <- site_meta + 1
+ta_tab_end_2 <- n_table_groups - 1 + ta_tab_start_2
+ta_tab_list_2 <- as.list(seq(ta_tab_start_2, ta_tab_end_2, by = 1))
+
+# Percentile levels tables
+amb_sum_tab_start <- ta_tab_end_2 + 1
+amb_sum_tab_end <- amb_sum_tab_start + n_table_groups - 1
+amb_sum_tab_list <- as.list(seq(amb_sum_tab_start, amb_sum_tab_end, by = 1))
+
+# SPLAT event counts/lengths table - only present if SPLAT was run
+# (splat==1) and Step1 produced the underlying CSVs. Placed immediately
+# after the percentile levels tables, since (like GRBA 2015's Table 8)
+# it belongs with the other main-Results tables, not in an appendix.
+# NOTE: this table is still produced one-per-site-per-folder regardless
+# of table_grouping - only the Time Above / Executive Summary /
+# Percentile tables above were requested to support combining.
+splateventlist <- if (splat == 1) {
+  list.files(path = dirs, pattern = "_EventCountsLengths_.*\\.csv$", full.names = TRUE, recursive = TRUE)
+} else character(0)
+# FIXED: see order_by_folder_num() definition (in "packages" chunk) for
+# why this recursive, multi-path list.files() call needs an explicit
+# re-sort - this was the direct cause of event-count tables appearing
+# out of folder/chronological order while non-recursive figure lists
+# (frecontlist, hourlycontlist, pacontlist below) did not.
+splateventlist <- order_by_folder_num(splateventlist)
+
+splat_tab_start <- amb_sum_tab_end + 1
+splat_tab_end <- if (length(splateventlist) > 0) splat_tab_start + length(splateventlist) - 1 else splat_tab_start - 1
+splat_tab_list <- if (length(splateventlist) > 0) as.list(seq(splat_tab_start, splat_tab_end, by = 1)) else list()
+
+# --- Figure numbering ---
+map <- 1
+
+# FIXED: "listener" was previously hardcoded to 2 regardless of whether
+# either_splat_listen was actually TRUE. If neither Listening Center nor
+# SPLAT was used, the listener figure/image never renders (its chunk is
+# eval=either_splat_listen), but frecont_fig_start still began at 3 -
+# leaving a permanent gap where "Figure 2" should have been. Now the
+# listener figure number is only reserved when it will actually appear.
+listener <- if (either_splat_listen) 2 else NA
+last_fig_before_freqcont <- if (either_splat_listen) listener else map
+
+# Frequency content figures
+frecontlist <- list.files(path = dirs, pattern = "SPLvFREQ", full.names = TRUE)
+frecont_fig_start <- last_fig_before_freqcont + 1
+frecont_fig_end <- length(frecontlist) - 1 + frecont_fig_start
+frecont_fig_list <- as.list(seq(frecont_fig_start, frecont_fig_end, by = 1))
+
+# Percentile sound levels (hourly) figures
+hourlycontlist <- list.files(path = dirs, pattern = "DBAvHR", full.names = TRUE)
+hourly_fig_start <- frecont_fig_end + 1
+hourly_fig_end <- length(hourlycontlist) - 1 + hourly_fig_start
+hourly_fig_list <- as.list(seq(hourly_fig_start, hourly_fig_end, by = 1))
+
+# Percent audibility figures
+pacontlist <- list.files(path = dirs, pattern = "top2", full.names = TRUE)
+pa_fig_start <- hourly_fig_end + 1
+pa_fig_end <- length(pacontlist) - 1 + pa_fig_start
+pa_fig_list <- as.list(seq(pa_fig_start, pa_fig_end, by = 1))
+
+
+# NFI time series figures - only present if SPLAT was used and Step1
+# produced the underlying PNGs. Inserted right after the top2 ("top
+# noise sources") figures and before anything appendix-related, so
+# run_logic() (below) picks up numbering from wherever this leaves off -
+# figureList.R itself does not need to change for this.
+nfilist <- if (splat == 1) {
+  list.files(path = dirs, pattern = "_NFI_timeseries\\.png$", full.names = TRUE, recursive = TRUE)
+} else character(0)
+# FIXED: same recursive/multi-path list.files() ordering issue as
+# splateventlist above - see order_by_folder_num() definition.
+nfilist <- order_by_folder_num(nfilist)
+
+nfi_fig_start <- pa_fig_end + 1
+nfi_fig_end <- if (length(nfilist) > 0) nfi_fig_start + length(nfilist) - 1 else nfi_fig_start - 1
+nfi_fig_list <- if (length(nfilist) > 0) as.list(seq(nfi_fig_start, nfi_fig_end, by = 1)) else list()
+
+# Whichever of pa_fig_end / nfi_fig_end is actually the last figure number
+# used so far determines where run_logic() should continue numbering the
+# appendix figures (site photos / GSM / detailed sound sources).
+last_fig_before_appendices <- if (length(nfilist) > 0) nfi_fig_end else pa_fig_end
+
+# --- Final figure indices based on selected appendices ---
+# (figureList.R encapsulated in run_logic)
+
+# Run only if NOT all of gsm, spics, and lcdet are NULL
+if (!(is.null(gsm) && is.null(spics) && is.null(lcdet))) {
+  # --- Final figure indices based on selected appendices ---
+  # (figureList.R encapsulated in run_logic)
+  output <- run_logic(spics, gsm, lcdet, last_fig_before_appendices, sitenum, dirs)
+
+  if (!is.null(output$site_fig_list)) site_fig_list <- output$site_fig_list
+  if (!is.null(output$gsm_indices)) {
+    gsm_exist   <- output$gsm_indices$gsm_exist
+    gsm_natural <- output$gsm_indices$gsm_natural
+    gsm_impact  <- output$gsm_indices$gsm_impact
+  }
+  if (!is.null(output$det_pa_fig_list)) det_pa_fig_list <- output$det_pa_fig_list
+  if (!is.null(output$det_pa_start)) det_pa_start <- output$det_pa_start
+  if (!is.null(output$det_pa_end)) det_pa_end <- output$det_pa_end
+
+}
+
+# --- Trend Graphs appendix figure numbering (new) ---
+# NOTE: figureList.R's run_logic() never returns site_fig_end (only
+# site_fig_list) back into this environment, so the last-used figure
+# number is derived from the last element of site_fig_list here rather
+# than a site_fig_end variable - figureList.R itself does not need to
+# change for this, matching the same "extend numbering directly in the
+# Rmd" approach already used above for nfilist.
+last_fig_before_trends <- last_fig_before_appendices
+if (exists("site_fig_list")) last_fig_before_trends <- site_fig_list[[length(site_fig_list)]]
+if (exists("gsm_impact"))    last_fig_before_trends <- gsm_impact
+if (exists("det_pa_end"))    last_fig_before_trends <- det_pa_end
+
+# Trend PNGs live under <report_dir>/trends/<Season>/*.png (written by
+# Step1's trend-building step) - NOT inside the per-order-number season
+# folders, since a trend graph by definition spans multiple order
+# numbers/years. To keep this appendix consistent with folder_scope,
+# only trend PNGs whose season subfolder matches a season actually
+# present in the (possibly order-number-filtered) `dirs` are included.
+trends_dir <- paste0(report_dir, "/trends")
+show_trends <- append4 == 1 && dir.exists(trends_dir)
+
+trendpngfiles <- if (show_trends) {
+  all_trend_files <- list.files(path = trends_dir, pattern = "\\.png$", full.names = TRUE, recursive = TRUE)
+  included_seasons <- unique(season_vec_all)
+  trend_file_season <- basename(dirname(all_trend_files))
+  all_trend_files[trend_file_season %in% included_seasons]
+} else character(0)
+
+show_trends <- show_trends && length(trendpngfiles) > 0
+if (append4 == 1 && !show_trends) {
+  message("Appendix (Trend Graphs) was requested, but no matching trend PNGs were found under: ", trends_dir,
+          " for the currently selected season(s)/folder(s). This appendix will be omitted. (Trend graphs are built by Step 1 and require at least 2 season/year combos for a given park.)")
+}
+
+trend_fig_start <- last_fig_before_trends + 1
+trend_fig_end <- if (length(trendpngfiles) > 0) trend_fig_start + length(trendpngfiles) - 1 else trend_fig_start - 1
+trend_fig_list <- if (length(trendpngfiles) > 0) as.list(seq(trend_fig_start, trend_fig_end, by = 1)) else list()
+
+# Small helper for the SPLAT event-length table: converts seconds to
+# mm:ss, matching how event lengths are reported in prior NSNSD reports
+# (e.g. GRBA 2015, Table 8).
+sec_to_mmss <- function(x) {
+  x <- round(as.numeric(x))
+  m <- x %/% 60
+  s <- x %% 60
+  sprintf("%02d:%02d", m, s)
+}
+```
+
+
+
+
+
+```{r datasum store, include=FALSE}
+
+# --- Gather Executive Summary data across folders ---
+all_data_list <- list()
+
+for (i in 1:length(datafolders)) {
+  # Build path to executive summary CSV for this season
+  datapath <- paste(datafolders[i], "/executivesumtab_", seasons[i], ".csv", sep = "")
+  
+  # SKIP (not error): a folder with no Listening Center or SPLAT data
+  # for that season is valid and expected - see has_execsum note in the
+  # "table numbering" chunk above, which already excluded these folders
+  # from the Executive Summary table's numbering. Appending only when
+  # the file exists (rather than assigning by index) keeps exec_sum
+  # correctly sized regardless of how many folders are skipped.
+  if (!file.exists(datapath)) next
+  
+  # Read and trim to relevant columns
+  data <- read.csv(datapath)
+  data <- data[, c(1:9)]
+  
+  # Normalize column names
+  names(data) <- gsub("\\.", " ", names(data))
+  
+  # Rename key columns for clarity
+  colnames(data)[1] <- "Site Name"
+  colnames(data)[6] <- "LA50Day"
+  colnames(data)[7] <- "LA50Night"
+  colnames(data)[8] <- "LANATDay"
+  colnames(data)[9] <- "LANATNight"
+  
+  # Add source metadata
+  data$Season <- seasons[i]
+  data$Year   <- years[i]
+  
+  # Collect
+  all_data_list[[length(all_data_list) + 1]] <- data
+}
+
+# Combine all seasons/years into one table
+exec_sum <- bind_rows(all_data_list)
+
+# --- Summary stats (for text) ---
+# na.rm=TRUE guards against a season/site with all-NA values silently
+# producing "NA" in the narrative text below rather than a real number -
+# same fix already applied to the equivalent calculation in Step3
+# (snapshot report); ported here for consistency.
+# Existing L50 (day/night)
+l50d_min <- min(exec_sum$LA50Day, na.rm = TRUE)
+l50d_max <- max(exec_sum$LA50Day, na.rm = TRUE)
+l50n_min <- min(exec_sum$LA50Night, na.rm = TRUE)
+l50n_max <- max(exec_sum$LA50Night, na.rm = TRUE)
+
+# Natural sound levels (day/night)
+lnatd_min <- min(exec_sum$LANATDay, na.rm = TRUE)
+lnatd_max <- max(exec_sum$LANATDay, na.rm = TRUE)
+lnatn_min <- min(exec_sum$LANATNight, na.rm = TRUE)
+lnatn_max <- max(exec_sum$LANATNight, na.rm = TRUE)
+
+# Total noise source percent audibility
+totns_min <- round(min(exec_sum$Noise), 1)
+totns_max <- round(max(exec_sum$Noise), 1)
+
+# NOTE on nsrc1/2/3 below: these read whatever is in columns 3/4/5 of the
+# COMBINED (bind_rows'd) exec_sum table. Step1 determines the "top 3
+# sources" independently for each season/year folder's executivesumtab
+# CSV - if the top 3 sources differ between seasons (e.g. Aircraft/
+# People/Vehicles in summer vs. Wind/Aircraft/Insects in winter),
+# bind_rows() aligns by COLUMN NAME, not position, so columns 3/4/5 after
+# combining may not consistently represent the same source across every
+# row. This is pre-existing behavior, not something changed here - just
+# flagging it as worth double-checking whenever a park has multiple
+# seasons with different dominant noise sources, since the narrative
+# text below assumes a single consistent top-3 across the whole report.
+
+# Percent audibility of top 3 noise sources
+src1_min <- round(min(exec_sum[3]), 1)
+src1_max <- round(max(exec_sum[3]), 1)
+src2_min <- round(min(exec_sum[4]), 1)
+src2_max <- round(max(exec_sum[4]), 1)
+src3_min <- round(min(exec_sum[5]), 1)
+src3_max <- round(max(exec_sum[5]), 1)
+
+# Top noise source names (as lower case text)
+nsrc1 <- tolower(colnames(exec_sum)[3])
+nsrc2 <- tolower(colnames(exec_sum)[4])
+nsrc3 <- tolower(colnames(exec_sum)[5])
+
+# Sites with highest/lowest total noise audibility
+most_noise_site  <- exec_sum[which.max(exec_sum$Noise), ]
+most_noise_site  <- most_noise_site$`Site Name`
+least_noise_site <- exec_sum[which.min(exec_sum$Noise), ]
+least_noise_site <- least_noise_site$`Site Name`
+
+# Max percent audibility and site for each of the top 3 sources
+most_noise_src1       <- exec_sum[which.max(exec_sum[[3]]), ]
+most_noise_src1_sname <- most_noise_src1$`Site Name`
+most_noise_src1_pa    <- round(most_noise_src1[[3]], 1)
+
+most_noise_src2       <- exec_sum[which.max(exec_sum[[4]]), ]
+most_noise_src2_sname <- most_noise_src2$`Site Name`
+most_noise_src2_pa    <- round(most_noise_src2[[4]], 1)
+
+most_noise_src3       <- exec_sum[which.max(exec_sum[[5]]), ]
+most_noise_src3_sname <- most_noise_src3$`Site Name`
+most_noise_src3_pa    <- round(most_noise_src3[[5]], 1)
+
+# --- Gather Listening Area Reduction (impact) data ---
+all_data_list <- list()
+for (i in 1:length(datafolders)) {
+  # Build path to impact listening area CSV for this season
+  datapath <- paste(datafolders[i], "/impactlisteningarea_", seasons[i], ".csv", sep = "")
+  
+  # SKIP (not error): see identical note in the executivesumtab loop
+  # above - impactlisteningarea_*.csv is written under the same
+  # eitherfiles condition in Step1, so it's typically absent from
+  # exactly the same folders. all_data_list is reset just above rather
+  # than reused from the executivesumtab loop, since appending (instead
+  # of assigning by index) means its length may now legitimately differ
+  # between the two loops.
+  if (!file.exists(datapath)) next
+  
+  # Read and trim to relevant columns
+  data <- read.csv(datapath)
+  data <- data[, c(1:7)]
+  
+  # Normalize column names
+  names(data) <- gsub("\\.", " ", names(data))
+  
+  # Rename key columns for clarity
+  colnames(data)[1] <- "Site Name"
+  colnames(data)[2] <- "Day_imp_dBA"
+  colnames(data)[3] <- "Day_LAR"
+  colnames(data)[4] <- "Night_imp_dBA"
+  colnames(data)[5] <- "Night_LAR"
+  colnames(data)[6] <- "Total_imp_dBA"
+  colnames(data)[7] <- "Total_LAR"
+  
+  # Add source metadata
+  data$Season <- seasons[i]
+  data$Year   <- years[i]
+  
+  # Collect
+  all_data_list[[length(all_data_list) + 1]] <- data
+}
+
+# Combine impact data and compute summaries
+impact_la <- bind_rows(all_data_list)
+med_imp   <- round(median(impact_la$Total_imp_dBA), 1)
+med_lar   <- round(median(impact_la$Total_LAR), 1)
+
+# Sites with highest/lowest total impact
+most_impact         <- impact_la[which.max(impact_la$Total_imp_dBA), ]
+most_impact_sname   <- most_impact$`Site Name`
+most_impact_db      <- round(max(most_impact$Total_imp_dBA), 1)
+most_impact_season  <- most_impact$`Season`
+most_impact_year    <- most_impact$`Year`
+
+least_impact        <- impact_la[which.min(impact_la$Total_imp_dBA), ]
+least_impact_sname  <- least_impact$`Site Name`
+least_impact_db     <- round(min(least_impact$Total_imp_dBA), 1)
+least_impact_season <- least_impact$`Season`
+least_impact_year   <- least_impact$`Year`
+
+```
+
+```{r gsm sum, include=FALSE}
+
+# --- Geospatial model data (existing, natural, impact) ---
+gsm_path <- paste("./../..//GSM_CSV/", sep = "")
+
+# Read model outputs
+df_e <- read.csv(paste(gsm_path, "/LA50_existing_NPS.csv", sep = ""))
+df_n <- read.csv(paste(gsm_path, "/LA50_natural_NPS.csv",  sep = ""))
+df_i <- read.csv(paste(gsm_path, "/LA50_impact_NPS.csv",   sep = ""))
+
+# Join by park unit code
+gsm_df <- df_e %>%
+  full_join(df_n, by = "UNIT_CODE") %>%
+  full_join(df_i, by = "UNIT_CODE")
+
+# Compute Listening Area Reduction (percent)
+gsm_df <- gsm_df %>%
+  mutate(LAR_perc = (1 - 10^(-MEDIAN_I / 10)) * 100)
+
+# Filter to selected park code
+gsm_filtered <- gsm_df %>%
+  mutate(UNIT_CODE = as.character(UNIT_CODE)) %>%
+  mutate(UNIT_CODE = trimws(UNIT_CODE)) %>%
+  filter(UNIT_CODE == pcode)
+
+# Guard: if this park has no GSM data, downstream round()/paste() calls
+# would otherwise silently produce blank values in Appendix B with no
+# indication why. gsm_data_available lets the Appendix 2 sections below
+# degrade gracefully (existing append2/append2a params already gate
+# whether Appendix B renders at all - this additionally protects against
+# append2 being set to "Yes" for a park this model simply hasn't covered).
+gsm_data_available <- nrow(gsm_filtered) > 0
+if (append2 == 1 && !gsm_data_available) {
+  message("Geospatial model data not found for park code '", pcode, "' - Appendix ", gsm, " text/figures will read as blank. Consider setting append2 to 'No' for this park.")
+}
+
+# --- Summary stats for report text ---
+if (gsm_data_available) {
+  gsm_l50_e      <- round(gsm_filtered$MEDIAN_E, 1)
+  gsm_l50_e_min  <- round(gsm_filtered$MIN_E,    1)
+  gsm_l50_e_max  <- round(gsm_filtered$MAX_E,    1)
+
+  gsm_l50_n      <- round(gsm_filtered$MEDIAN_N, 1)
+  gsm_l50_n_min  <- round(gsm_filtered$MIN_N,    1)
+  gsm_l50_n_max  <- round(gsm_filtered$MAX_N,    1)
+
+  gsm_l50_i      <- round(gsm_filtered$MEDIAN_I, 1)
+  gsm_l50_i_min  <- round(gsm_filtered$MIN_I,    1)
+  gsm_l50_i_max  <- round(gsm_filtered$MAX_I,    1)
+
+  gsm_l50_LAR       <- round(gsm_filtered$LAR_perc, 1)  # % area reduced
+  gsm_l50_LAR_area  <- 100 - gsm_l50_LAR                 # % area remaining
+}
+
+
+```
+
+:::{custom-style="sr Title"}
+`r (park)`
+:::
+
+:::{custom-style="sr Subtitle"}
+Acoustic Monitoring Report `r (daterange)`
+:::
+
+
+
+
+
+
+```{r coverimage, echo=FALSE, results='asis'}
+
+# FIXED: fig.cap (even a near-empty " ") on a knitr::include_graphics()
+# chunk tells knitr to wrap the image in an auto-numbered figure
+# environment, which Pandoc then renders into Word as a literal
+# "Figure: " paragraph above the manual "sr Photo caption" block below -
+# a duplicate, unstyled caption line nobody wanted. Every other
+# include_graphics() call in this document (site map, listener image,
+# equation image) already omits fig.cap for this exact reason, since
+# captions here are handled manually via styled custom-style divs
+# instead. Removing it here brings this chunk in line with those.
+# FIXED (separately): out.width was previously set at the chunk-option
+# level (out.width='75%') - switched to include_graphics_ar() (defined
+# in the "packages" chunk) instead, which also computes a matching
+# out.height from the image's real pixel dimensions to prevent
+# distortion. See that function's definition for the full explanation.
+# --- Include cover image in report ---
+cover_image_path <- paste(park.image.folder, "cover_image.png", sep = "")
+if (file.exists(cover_image_path)) {
+  include_graphics_ar(cover_image_path, 0.75)
+} else {
+  message("cover_image.png not found at: ", cover_image_path, " - cover image will be omitted.")
+}
+
+
+```
+
+
+:::{custom-style="sr Photo caption"}
+Acoustic monitoring in `r (park)`
+:::
+:::{custom-style="sr Cover photo credits"}
+NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION
+::: 
+
+:::{custom-style="sr Alternate text"}
+Standard monitoring equipment utilized for acoustic monitoring in `r (park)`. Included within the image are two tripods holding a microphone and weather monitoring instrumentation. Near the two tripods is a solar panel and boxes that hold batteries, a data logger, and an acoustic recording unit. **!-- Reminder:UPDATE DESCRIPTIVE TEXT--! Modify equipment text if different than above. Example habitat language in the image: The image is within and arid and sparsely vegetated volcanic landscape.**
+:::
+
+\newpage
+
+:::{custom-style="sr Normal"}
+FirstName MiddleInitial. LastName (ORCID if available)^1^, FirstName MiddleInitial. LastName^2^, FirstName MiddleInitial. LastName^1^
+
+^1^ Organization Name, Office/Unit Name 1 (optional) (NPS Office/Unit, University Dept., etc.), Street Address, City Name, ST ZipCode (zip is optional)
+
+^2^ Organization Name, Office/Unit Name 2 (optional) (NPS Office/Unit, University Dept., etc.), Street Address, City Name, ST ZipCode (zip is optional)
+
+User Note (optional): see the First/Title page section of the online user guide for additional guidance.
+
+
+:::
+
+
+
+
+\newpage
+
+
+:::{custom-style="sr Heading 1"}
+Abstract
+:::
+:::{custom-style="sr Normal"}
+This study arose from the `r (park)` (`r (pcode)`) **!-- Reminder:UPDATE EXAMPLE TEXT--!  Resource Stewardship Strategy (RSS), which identified the need for baseline acoustic surveys in the park. Short-term natural soundscape RSS goals were to identify the condition of the acoustic resource, and the high priority stewardship activity associated with this goal was to collect baseline acoustic data**. Therefore, across `r (season_countword)` `r (season_s)` `r (daterange_text)`, the Natural Sounds and Night Skies Division (NSNSD) gathered acoustical data at `r (sitenumword)` `r (site_s)` in `r (pcode)` to provide park managers with information about the acoustical environment, sources of noise, and the existing ambient sound levels within the park. On average, noise was present from `r (totns_min)` (`r (least_noise_site)`) to `r (totns_max)` (`r (most_noise_site)`) percent of that time across `r (sitenumword)` `r (site_s)`. The most common sources of noise were `r (nsrc1)`, `r (nsrc2)`, and `r (nsrc3)`.  The maximum percent time audible of `r (nsrc1)` noise was at `r (most_noise_src1_sname)`, audible for `r (most_noise_src1_pa)` % of a 24-hr period. For `r (nsrc2)` noise at `r (most_noise_src2_sname)`, the maximum time audible was `r (most_noise_src2_pa)` % of a 24-hr period, and for `r (nsrc3)` noise at `r (most_noise_src3_sname)`, the maximum time audible was `r (most_noise_src3_pa)` % of a 24-hr period. Overall, existing ambient sound levels (L~A50~) at sites within `r (pcode)` ranged from `r (l50d_min)` – `r (l50d_max)` dB during the day and `r (l50n_min)`-`r (l50n_max)` dB at night during the sampling period. Natural ambient sound levels (L~Anat~) at sites within `r (pcode)` ranged from `r (lnatd_min)`– `r (lnatd_max)` dB during the day and `r (lnatn_min)`-`r (lnatn_max)` dB at night. The median impact across all sites, defined as the difference in dB between the L~A50~ and L~Anat~, was `r (med_imp)` dB, reducing the listening area by `r (med_lar)` %. Finally, noise impacts ranged from `r (least_impact_db)` dB at `r (least_impact_sname)` in the `r (least_impact_season)` `r (least_impact_year)` to `r (most_impact_db)` dB at `r (most_impact_sname)` in the `r (most_impact_season)` `r (most_impact_year)`. 
+
+**Keywords (optional):** Acoustic monitoring, baseline ambient, natural sound, sound level, noise, soundscape
+:::
+:::{custom-style="sr Heading 1"}
+Acknowledgements
+:::
+:::{custom-style="sr Normal"}
+The authors would like to acknowledge the staff at `r (park)` for their support in this fieldwork and logistics, notably **!-- Reminder:UPDATE EXAMPLE TEXT--! [insert park staff here]**. We also thank the peer reviewers for recommendations that improved this series of reports.
+:::
+:::{custom-style="sr Heading 1"}
+List of Terms or Acronyms
+:::
+:::{custom-style="sr Normal"}
+**A-weighting:** A-weighting is applied to sound levels to account for the sensitivity of the human ear (Harris, 1998). To approximate human hearing sensitivity, A-weighting discounts sounds below 1 kHz and above 6 kHz.
+
+**Acoustic Environment:** A combination of all the physical sound resources within a given area. This includes natural sounds and cultural sounds, and non-natural human-caused sounds. The acoustic environment of a park can be divided into two main categories: intrinsic and extrinsic.
+
+**Acoustic Resources:** Includes both natural sounds like wind, water, and wildlife and cultural and historic sounds like tribal ceremonies, quiet reverence, and battle reenactments.
+
+**Amplitude:** The relative strength of a sound wave, described in decibels (dB). Amplitude is related to what we commonly call loudness or volume.
+
+**ANS Weighting:** The Natural Sounds modification to A-weighting eliminates high-frequency sound (leaf rustle, equipment noise, and biologic sounds) allowing for more accurate comparisons of low-frequency ambient sound levels across different land use types (e.g., urban, protected areas; ANSI S3/SC1.100, 2014 [R2020]). This frequency weighting scheme improves ambient sound level measurements in quiet environments.
+
+**Audibility:** The ability of animals with normal hearing, including humans, to hear a given sound. It can vary depending upon the frequency content and amplitude of sound and by hearing ability of individual animals.
+
+**Day-Night average sound levels (L~dn~):** Average equivalent sound level over a 24-hour period, with a 10-dB penalty added for sound levels between 10 p.m. and 7 a.m.
+
+**Decibel (dB):** A unit of sound energy. Sound levels are measured on a logarithmic scale relative to the reference sound pressure for atmospheric sources, 20 µPa. The logarithmic scale is a useful way to express the wide range of sound pressures perceived by the human ear. Every 10 dB increase represents a tenfold increase in energy. Therefore, a 20 dB increase represents a hundredfold increase in energy.
+
+**Energy Equivalent Sound Level (L~Aeq~):** The sound energy level averaged over the measurement period. Generally, refers to A-weighted 1-second time averaged sound levels measured between 12.5 Hz - 20 kHz. This is a standard measurement collected using NSNSD acoustic monitoring protocol for sound level meters. Sound levels measured over 1 second intervals are used to calculate summary statistics, specifically percent of the time a sound level of interest is exceeded.
+
+**Existing ambient sound level (L~A50~):** Sound level (L~Aeq,~~1s~) exceeded 50% of the time (50^th^ percentile) for a specified duration. This level is referred to as the existing ambient sound level and the preferred metric for chronic conditions, as it is insensitive to infrequent loud events.
+
+**Frequency:** Related to the pitch of a sound, and defined as the number of times per second that the wave of sound repeats itself and is expressed in terms of hertz (Hz). Sound levels are often adjusted ("weighted") to match the hearing abilities of a given animal. In other words, different species of animals and humans are capable or hearing (or not hearing) at different frequencies. Humans with normal hearing can hear sounds between 20 Hz and 20,000 Hz, and as low as 0 dB at 1,000 Hz. Bats, on the other hand, can hear sounds between 20 Hz and 200,000 Hz.
+
+**Natural Ambient Sound Level (L~Anat~):** The natural sound conditions in parks, which would exist in the absence of any human-caused noise sources. L~Anat~ is the preferred metric to represent baseline or reference conditions.
+
+**Noise Free Interval (NFI):** The length of the continuous period during which no human-caused sounds are audible. Over a longer sampling period, the median NFI can describe how a typical opportunity for solitude has been fragmented by noise (Poling and Betchkal 2023).
+
+**Percentile sound levels (L~A10~, L~A50~, L~A90~):** Metrics used to describe A-weighted sound pressure levels (L), in decibels, exceeded 10, 50, and 90 percent of the time, respectively. Put another way, half the time the measured levels of sound are greater than the L~A50~ value, while 90 percent of the time the measured levels are higher than the L~A90~ value and 10 percent of the time measured levels are higher than the L~A10~ value.
+
+**Sound Exposure Level (SEL):** The total sound energy of the actual sound during a specific time period. SEL is usually expressed using a time period of one second.
+
+**Sound Pressure:** Minute change in atmospheric pressure due to passage of sound that can be detected by microphones.
+
+**Soundscape:** The human perception of physical sound resources.
+
+**Sound vs. Noise:** Sound and noise are often used interchangeably to describe an acoustic source. A common definition of noise is unwanted sound or sounds that interfere with a signal of interest (Harris 1998; Templeton 1997). However, noise is not a purely subjective designation. Any sound that serves no function is noise. Most sounds produced by human transportation and other machinery are unintended and serve no function, therefore are noise regardless of the attitudes of the listener. While there are unintended sounds in nature, like the footfalls of an animal, these sounds provide vital cues for some receivers and are therefore considered sounds to the receiver, yet noise from the perception of the producer.
+
+**Time Above:** Within a defined period, the percent of the time sound levels (L~Aeq,~~1s~) are above a specified sound level (L~Aeq,~~1s~). Commonly used levels are 35, 45, 52 dB (L~Aeq,~~1s~).
+
+**Time Audible:** The amount of time that various sound sources are audible to humans with normal hearing, commonly expressed in percent of day, or percent of daytime hours and nighttime hours. A sound may be above natural ambient sound pressure levels, but still not audible. Similarly, some sounds that are below the natural ambient can be audible. Time Audible is useful because of its simplicity. It is a measure that correlates well with visitor complaints of excessive noise and annoyance. Most noise sources are audible to humans at lower levels than virtually all wildlife species. Therefore, time audible is a protective proxy for wildlife. These data can be collected either by a trained observer (on-site listening) or by making high-quality digital recordings for later playback (off-site listening).
+
+*Note: entries above are in alphabetical order, per NPS Science Report Series editorial convention - if adding a new term, insert it in alphabetical position rather than appending it at the end.*
+:::
+
+:::{custom-style="sr Heading 1"}
+Executive Summary
+:::
+:::{custom-style="sr Normal"}
+This report presents acoustical data gathered by the Natural Sounds and Night Skies Division (NSNSD) at `r (park)` (`r (pcode)`) across `r (season_countword)` `r (season_s)` `r (daterange_text)`. Data were collected at `r (sitenumword)` sites to provide park managers with information about the acoustical environment, sources of noise, and the existing ambient sound levels within the park. In these deployments, sound pressure level (SPL) was measured continuously every second by a calibrated sound level meter. Other equipment included an anemometer to collect wind speed and a digital audio recorder collecting continuous recordings to document sound sources. 
+
+In this document, "sound pressure level" refers to broadband (12.5 Hz – 20,000 Hz), A-weighted, 1-second time averaged sound level (L~Aeq,~~1s~~[12.5~~–~~20,000~~Hz]~), and hereafter referred to as "sound level." Sound levels are measured on a logarithmic scale relative to the reference sound pressure for atmospheric sources, 20 µPa. The logarithmic scale is a useful way to express the wide range of sound pressures perceived by the human ear. Sound levels are reported in decibels (dB). A-weighting is applied to sound levels to account for the response of the human ear (Harris, 1998). To approximate human hearing sensitivity, A-weighting discounts sounds below 1 kHz and above 6 kHz. For reference, Table 1 provides examples of sound levels measured in parks compared to sound levels of common sources.
+:::
+
+:::{custom-style="sr Table caption"}
+Table 1. Sound level examples.
+:::
+
+```{r table1, echo=FALSE, ft.align="center",out.width = '100%'}
+
+# --- Create reference table of sound sources and levels ---
+tab1 <- data.table(
+  "Park Sound Sources" = c(
+    "Volcano crater (HALE)",
+    "Leaves rustling (CANY)",
+    "Crickets at 5m (ZION)",
+    "Conversation at 5m (WHMI)",
+    "Cruiser motorcycle at 15m (BLRI)",
+    "Thunder (ARCH)",
+    "Military jet at 100m AGL (YUCH)"
+  ),
+  "Common Sound Sources" = c(
+    "Human breathing at 3m",
+    "Whispering",
+    "Residential area at night",
+    "Car at 15 m, 30 mph",
+    "Curbside of busy street",
+    "Jackhammer at 2 m",
+    "Train horn at 1 m"
+  ),
+  "Sound Level dB*" = c(10, 20, 40, 60, 80, 100, 120)
+)
+
+# --- Format table using flextable ---
+flextable(tab1) %>% 
+  align(j = 1:2, align = "left", part = "all") %>%    # Left-align first two columns
+  align(j = 3, align = "center", part = "all") %>%    # Center-align dB column
+  fontsize(size = 9, part = "header") %>%             # Header font size
+  bold(part = "header") %>%                           # Bold header
+  fontsize(size = 9, part = "body") %>%               # Body font size
+  padding(padding = 0.5, part = "all") %>%            # Cell padding
+  autofit() %>%                                       # Auto-adjust column widths
+  border_outer() %>%                                  # Outer border
+  border_inner()                                      # Inner borders
+
+
+```
+
+:::{custom-style="sr Table note"}
+
+*dB re 20 µPa A-weighted broadband (12.5 Hz – 20 kHz), sound level measured over varied measurement durations and at the distances indicated.
+
+:::
+<br>
+
+:::{custom-style="sr Normal"}
+
+Overall, existing ambient sound levels (L~A50~) at sites within `r (pcode)` ranged from `r (l50d_min)` – `r (l50d_max)` dB during the day and `r (l50n_min)`-`r (l50n_max)` dB at night during the sampling period. Table(s) `r ( ta_tab_start_1)` **- `r ( ta_tab_end_1)`**  reports the percent of time that measured levels at the monitoring locations were above four key sound level values. The first value, 35 dB (L~Aeq,~~1s~), is used by the NPS as an indicator of overall quality of the acoustic environment. Beyond this level, noise begins to negatively affect the visitor experience in an otherwise natural acoustic environment (Pilcher et al. 2009; Watts et al. 2020; Betchkal et al. 2023). As wildlife begin to exhibit signs of disturbance at noise levels as low as 40 dB (Shannon et al. 2016), 45 dB represents a conservative estimate of negative effects on wildlife. The third value, 52 dB (L~Aeq,~~1s~), is based on the EPA's speech interference level for speaking in a raised voice to an audience at 10 meters (EPA 1974). This value addresses the effects of sound on interpretive presentations in parks. The final value, 60 dB (L~Aeq,~~1s~), provides a basis for estimating speech interference on normal voice communications at 1 meter. Visitors viewing scenic areas in the park would likely be conducting such conversations. 
+
+Sound levels are often measured over narrow frequency bands (typically in one-third octave bands between 12.5 Hz – 20 kHz) because these smaller bands closely represent how humans distinguish between frequencies of sound. In this study, we examine how often sound levels exceeded key values in two frequency ranges. The top value in each split-cell of Table(s) `r ( ta_tab_start_1)` **- `r ( ta_tab_end_1)`**  uses the full frequency range (12.5 Hz – 20 kHz) collected, whereas the bottom value focuses on frequencies affected by low frequency noise sources (20 – 1,250 Hz). This Natural Sounds modification to A-weighting ((referred to as A-weighted Natural Sounds (ANS) weighting, ASA/ANSI S3/SC1.100-2014 [2020]) eliminates high-frequency sound (leaf rustle, equipment noise, and biologic sounds) allowing for more accurate comparisons of low-frequency ambient sound levels across different land use types (e.g., urban, protected areas; ASA/ANSI S3/SC1.100-2014 [2020]). This frequency weighting scheme improves ambient sound level measurements in quiet environments. For instance, in the full frequency range, the 35 dB (L~Aeq,~~1s~) level was exceeded at **!-- Reminder:UPDATE SITE (CHOOSE FROM TABLE) `r (pcode)`00X 16.74 %** of the time during the day and **!-- Reminder:UPDATE DATA (FROM TABLE AND SITE CHOSEN) 3.31 %** of the time at night, **!-- Reminder:UPDATE TEXT (DESCRIBE CHOSEN SITE) --!  in the 20 – 1,250 Hz range, the 35 dB functional sound level value was very rarely exceeded in daytime or nighttime**. Speech interruption (between two people 1 meter apart) occurs at 60 dB (~LAeq,~~1s~) and this level was rarely exceeded at any of the sites. 
+
+
+<br>
+:::
+
+```{r timeabove1, echo=FALSE, results='asis', ft.align="center", out.width='100%'}
+
+# --- Time-above sound level tables (day & night) ---
+# Loops over table_groups (see "table numbering" chunk above) rather
+# than datafolders directly - in "separate" mode (default) each group is
+# exactly one folder, identical to the previous behavior. In "combine"
+# mode each group is one season, combining every year's data into a
+# single table with an inserted "Year" column. Caption applied via
+# styled_block() as before.
+for (g in seq_along(table_groups)) {
+  grp <- table_groups[[g]]
+
+  group_rows <- lapply(grp$indices, function(i) {
+    datapath <- paste(datafolders[[i]], "/timeabove_", seasons[[i]], ".csv", sep = "")
+    d <- read.csv(datapath)
+    d <- d[, 1:10]
+    colnames(d) <- c(
+      "Site Name", "Frequency Range",
+      "35 dB ", "45 dB ", "52 dB ", "60 dB ",
+      "35 dB",  "45 dB",  "52 dB",  "60 dB"
+    )
+    if (combine_tables_by_season) {
+      d$Year <- years[[i]]
+      # Year placed immediately after Site Name (2nd column), per
+      # requested report convention - reordered here so bind_rows()
+      # below stacks consistently-ordered columns from every folder.
+      d <- d[, c("Site Name", "Year", setdiff(names(d), c("Site Name", "Year")))]
+    }
+    d
+  })
+  data <- bind_rows(group_rows)
+
+  # Alignment done by COLUMN NAME rather than fixed position, since
+  # Year (when present) now sits at position 2, shifting Frequency Range
+  # and the dB columns over by one relative to "separate" mode.
+  fixed_cols <- c("Site Name", "Frequency Range")
+  if (combine_tables_by_season) fixed_cols <- c(fixed_cols, "Year")
+  db_cols <- setdiff(names(data), fixed_cols)
+
+  # FIXED: this chunk was the one holdout still using
+  # style(pr_p = officer::fp_par(word_style = "sr Normal"), part = "body")
+  # left over from an earlier intermediate state - every other looped
+  # table (execsumtab, timeabove2, percentiles, splat_events_table) uses
+  # "sr Table header"/"sr Table cell" instead. Brought in line with
+  # those here for consistency.
+  tb <- flextable(data) %>%
+    align(j = c("Site Name", "Frequency Range"), align = "left", part = "all") %>%
+    align(j = db_cols, align = "left", part = "all") %>%
+    fontsize(size = 9, part = "header") %>%             # Header font size
+    bold(part = "header") %>%                           # Bold header
+    fontsize(size = 9, part = "body") %>%               # Body font size
+    padding(padding = 0.5, part = "all") %>%            # Cell padding
+    autofit() %>%                                       # Auto-fit columns
+    border_outer() %>%                                  # Outer border
+    border_inner() %>%                                  # Inner borders
+    style(pr_p = officer::fp_par(word_style = "sr Table header"), part = "header") %>%
+    style(pr_p = officer::fp_par(word_style = "sr Table cell"), part = "body")
+
+  if (combine_tables_by_season) {
+    tb <- align(tb, j = "Year", align = "left", part = "all")
+  }
+
+  # Grouped header row (daytime vs nighttime) - the first (blank) header
+  # block now spans Site Name (+ Year, when present) + Frequency Range,
+  # so its width always matches however many non-dB columns actually
+  # exist, regardless of table_grouping mode.
+  first_block_width <- length(fixed_cols)
+  header_values <- c(
+    "",
+    "Time above sound level (% of daytime hours, 07:00–19:00)",
+    "Time above sound level (% of nighttime hours, 19:00–07:00)"
+  )
+  header_widths <- c(first_block_width, 4, 4)
+  tb <- add_header_row(x = tb, values = header_values, colwidths = header_widths)
+
+  # Caption applied via styled_block() (see note on the original fix for
+  # why this replaced flextable's set_caption(..., word_stylename=...)).
+  # grp$year_label is a single year in "separate" mode, or a
+  # "YYYY - YYYY" range in "combine" mode when the season spans more
+  # than one year. grp$season_label is already lowercased at the source
+  # (see build_table_groups in the "table numbering" chunk) since it's
+  # always used mid-sentence here.
+  styled_block("sr Table caption",
+    "Table ", ta_tab_list_1[[g]], 
+    ". Percent time above metrics for acoustic records collected in ", 
+    park, " (", pcode, ") in ", grp$season_label, ", ", grp$year_label, 
+    ". Sound level functional values are displayed in decibels (dB LAeq, 1s re 20 µPa). ",
+    "The percent of time ANS-weighted sound levels (20–1,250 Hz) are above functional values."
+  )
+  
+  # Output flextable to RMarkdown
+  flextable_to_rmd(tb)
+  
+  # Add spacing between tables
+  cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
+}
+```
+
+
+<br>
+
+:::{custom-style="sr Normal"}
+
+After data collection was complete, trained technicians calculated how often noise sources were audible. See Methods section for protocol details, equipment specifications, and metrics calculations. Sound source analysis revealed that noise was audible about `r (totns_min)` (`r (least_noise_site)`) to `r (totns_max)` (`r (most_noise_site)`) % of the time during the sampling period at study sites when averaged across all hours of the day (Table `r (ex_sum_tab_start)` **- `r (ex_sum_tab_end)`**). The most common noise sources observed during this study were `r (nsrc1)`, `r (nsrc2)`, and `r (nsrc3)`. Natural sources such as **!-- Reminder:UPDATE TEXT--!  wind, rain, thunder, coyotes, songbirds, and insects were also commonly audible.** Natural ambient sound levels (L~Anat~) ranged between `r (lnatd_min)`– `r (lnatd_max)` during the day and `r (lnatn_min)`-`r (lnatn_max)` dB at night. Increased natural ambient sound levels during day and night varied by location and were likely caused by diurnal winds and site-specific insect and bird activity. 
+:::
+
+```{r execsumtab, echo=FALSE, results='asis',ft.align="center",out.width = '100%'}
+
+# --- Executive summary tables across exec_table_groups (only folders
+# that actually have executivesumtab data - see has_execsum in the
+# "table numbering" chunk above). Same combine/separate logic as
+# "timeabove1" otherwise.
+for (g in seq_along(exec_table_groups)) {
+  grp <- exec_table_groups[[g]]
+
+  group_rows <- lapply(grp$indices, function(i) {
+    datapath <- paste(datafolders[[i]], "/executivesumtab_", seasons[[i]], ".csv", sep = "")
+    d <- read.csv(datapath)
+    d <- d[, 1:9]
+    names(d) <- gsub("\\.", " ", names(d))
+    colnames(d)[1] <- "Site Name"
+    colnames(d)[6] <- " Day"    # leading space for alignment
+    colnames(d)[7] <- " Night"  # leading space for alignment
+    colnames(d)[8] <- "Day "
+    colnames(d)[9] <- "Night "
+    if (combine_tables_by_season) d$Year <- years[[i]]
+    d
+  })
+  data <- bind_rows(group_rows)
+
+  # Columns 2:5 of executivesumtab_*.csv are "Noise" plus that file's
+  # top-3 noise sources BY NAME (e.g. "Aircraft", "Vehicles") - these
+  # names are data-dependent, not fixed. In "combine" mode, if different
+  # years had different top-3 sources, bind_rows() unions these columns
+  # by name, so the combined table can have more than 4 noise-metric
+  # columns. noise_cols/n_noise_cols below are computed AFTER binding so
+  # the header always matches however many actually exist. Year is
+  # placed immediately after Site Name (2nd column), matching the same
+  # convention applied in timeabove1/timeabove2/percentiles.
+  fixed_cols <- c("Site Name", " Day", " Night", "Day ", "Night ")
+  noise_cols <- setdiff(names(data), c(fixed_cols, "Year"))
+  reorder_cols <- c("Site Name",
+                    if ("Year" %in% names(data)) "Year",
+                    noise_cols, " Day", " Night", "Day ", "Night ")
+  data <- data[, reorder_cols]
+  n_noise_cols <- length(noise_cols)
+  
+  # Format table with flextable
+  tb <- flextable(data) %>% 
+    align(j = 1:ncol(data), align = "left",  part = "all") %>%
+    fontsize(size = 9, part = "header") %>%              # Header font size
+    bold(part = "header") %>%                            # Bold header
+    fontsize(size = 9, part = "body") %>%                # Body font size
+    padding(padding = 0.5, part = "all") %>%             # Cell padding
+    autofit() %>%                                        # Auto-fit columns
+    border_outer() %>%                                   # Outer border
+    border_inner() %>%                                   # Inner borders
+    style(pr_p = officer::fp_par(word_style = "sr Table header"), part = "header") %>%
+    style(pr_p = officer::fp_par(word_style = "sr Table cell"), part = "body")
+
+  # Numeric formatting (1 decimal, show "N/A" for missing)
+  tb <- colformat_double(x = tb, digits = 1, na_str = "N/A")
+
+  # Grouped header row - first (blank) block now spans Site Name (+
+  # Year, when present); widths derive from the ACTUAL column counts
+  # (n_noise_cols) rather than a hardcoded number, so this can't desync
+  # from the data again regardless of how many distinct top-3 sources
+  # ended up unioned together above.
+  first_block_width <- if ("Year" %in% names(data)) 2 else 1
+  header_values <- c(
+    "",
+    "a) Mean time audible for noise (% of 24-hour time period)",
+    "b) Median Existing Ambient (L~A50~) in dB",
+    "Median Natural Ambient (L~Anat~) in dB"
+  )
+  header_widths <- c(first_block_width, n_noise_cols, 2, 2)
+
+  # SAFETY CHECK: header_widths is built FROM ncol(data) above, so this
+  # sum should always equal ncol(data) by construction. If it doesn't,
+  # something upstream desynced the two - this stops with the actual
+  # counts instead of flextable's generic "sum of colwidths...must be
+  # equal to...col_keys" error.
+  if (sum(header_widths) != ncol(data)) {
+    stop("Executive Summary table header/column count mismatch for season '", grp$season_label,
+         "', year(s) '", grp$year_label, "': header_widths sums to ", sum(header_widths),
+         " but data has ", ncol(data), " columns.",
+         "\n  Noise-metric columns detected (", n_noise_cols, "): ", paste(noise_cols, collapse = ", "),
+         "\n  All columns: ", paste(names(data), collapse = ", "))
+  }
+  tb <- add_header_row(x = tb, values = header_values, colwidths = header_widths)
+
+  styled_block("sr Table caption",
+    "Table ", ex_sum_tab_list[[g]], ". Summary of ", grp$season_label, " noise sources and sound levels at ", park, " (", pcode, 
+    ") in ", grp$year_label, ". Included for each site are mean percent time audible for all human-caused noise, including the top known noise sources, and existing (L~A50~) and natural (L~Anat~) ambient sound levels (dB re 20 µPa, A-weighted broadband, 12.5 Hz—20 kHz) during the day (0700-1900) and night (1900-0700). The difference between the natural and existing ambient sound levels indicates the deviation from the natural condition. L~Anat~ is calculated based on sound source identification from audio recordings."
+  )
+  
+  # Output flextable
+  flextable_to_rmd(tb)
+
+  # Spacing between tables
+  cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
+}
+
+
+```
+<br>
+:::
+
+
+:::{custom-style="sr Heading 1"}
+Introduction
+:::
+:::{custom-style="sr Normal"}
+A 1998 survey of the American public revealed that 72 percent of respondents thought that providing opportunities to experience natural quiet and the sounds of nature was a very important reason for having national parks, while another 23 percent thought that it was somewhat important (Haas & Wakefield 1998). In another survey specific to park visitors, 91 percent of respondents considered enjoyment of natural quiet and the sounds of nature as compelling reasons for visiting national parks (McDonald et al. 1995). Acoustic monitoring provides a scientific basis for assessing the status of acoustic resources, identifying trends in resource conditions, quantifying impacts from other actions, assessing consistency with park management objectives and standards, and informing management decisions regarding desired future conditions. 
+
+:::{custom-style="sr Heading 2"}
+National Park Service Natural Sounds and Night Skies Division 
+:::
+
+The Natural Sounds and Night Skies Division (NSNSD) helps parks manage sounds in a way that protects park resources and the visitor experience. The NSNSD addresses acoustic issues raised by Congress, NPS Management Policies, and NPS Director's Orders. The NSNSD works to protect, maintain, or restore acoustic environments throughout the National Park System. Its goal is to provide coordination, guidance, and a consistent approach to soundscape protection with respect to park resources and visitor use. The program also provides technical assistance to parks in the form of acoustic monitoring, data processing, park planning support, and comparative analyses of acoustic environments. 
+
+:::{custom-style="sr Heading 2"}
+Soundscape Planning Authorities 
+:::
+
+The National Park Service Organic Act of 1916 states that the purpose of national parks is "… to conserve the scenery and the natural and historic objects and the wild life therein and to provide for the enjoyment of the same in such manner and by such means as will leave them unimpaired for the enjoyment of future generations." In addition to the NPS Organic Act, the Redwoods Act of 1978 affirmed that, "the protection, management, and administration of these areas shall be conducted in light of the high value and integrity of the National Park System and shall not be exercised in derogation of the values and purposes for which these various areas have been established, except as may have been or shall be directly and specifically provided by Congress." 
+NPS Management Policies 2006 (NPS 2006) Chapter 4.9 provides direction for management of natural soundscapes: 
+:::
+
+:::{custom-style="sr Normal quotation"}
+"The National Park Service will preserve, to the greatest extent possible, the natural soundscapes of parks…
+
+"The Service will restore to the natural condition wherever possible those park soundscapes that have become degraded by unnatural sounds (noise) and will protect natural soundscapes from unacceptable impacts.
+
+"Using appropriate management planning, superintendents will identify what levels and types of unnatural sound constitute acceptable impacts on park natural soundscapes. The frequencies, magnitudes, and durations of acceptable levels of unnatural sound will vary throughout a park, being generally greater in developed areas. In and adjacent to parks, the Service will monitor human activities that generate noise that adversely affects park soundscapes [acoustic resources], including noise caused by mechanical or electronic devices. The Service will take action to prevent or minimize all noise that through frequency, magnitude, or duration adversely affects the natural soundscape [acoustic resource] or other park resources or values, or that exceeds levels that have been identified through monitoring as being acceptable to or appropriate for visitor uses at the sites being monitored" (NPS 2006). 
+:::
+:::{custom-style="sr Normal"}
+It should be noted that under Management Policies 2006 Chapter 8.2.3, "[t]he natural ambient sound level—that is, the environment of sound that exists in the absence of human-caused noise—is the baseline condition, and the standard against which current conditions in a soundscape [acoustic resource] will be measured and evaluated" (NPS 2006). However, the desired acoustic condition may also depend upon the resources and the values of the park. For instance, "culturally appropriate sounds are important elements of the national park experience in many parks" (NPS 2006). In this case, "the Service will preserve soundscape resources and values of the parks to the greatest extent possible to protect opportunities for appropriate transmission of cultural and historic sounds that are fundamental components of the purposes and values for which the parks were established" (NPS 2006). 
+
+Further guidance is provided in Management Policies 2006 §4.1.4 Partnerships, §4.1.5 Restoration of Natural Systems, §8.2 Visitor Use, §8.2.2 Recreational Activities, §8.2.3 Use of Motorized Equipment, and §8.4 Overflights and Aviation Uses (NPS 2006). 
+
+Director's Order 47, Soundscape Preservation and Noise Management (2000) builds on the principles set out in Management Policies, directing park management how and when to consider acoustic resources. Through this order, parks are guided to manage noise by: identifying noise sources, minimizing noise from park operations, considering the acoustic environment in park planning documents, and promoting park sounds and noise management through communication, education, and outreach.
+:::
+:::{custom-style="sr Heading 2"}
+Focal Park Unit 
+:::
+:::{custom-style="sr Normal"}
+`r (park)` (`r (pcode)`) **!-- Reminder:UPDATE TEXT (~EXAMPLE/USE LANGUAGE IN RSSs/FOUNDATION DOCUMENTS/ETC. protects a vast "weird and scenic landscape" with remarkable and diverse volcanic features, sagebrush steppe ecosystems, and wilderness, which provides opportunities to explore, understand, and value the rugged and remote high desert landscape of the Great Rift Region (NPS 2014). The `r (pcode)` Foundation Document identifies Wilderness Character as a Fundamental Resource Value and identifies highway traffic impacts to the natural soundscape in Wilderness as an important issue for the park to strategically address (NPS 2014). Furthermore, the `r (pcode)` Resource Stewardship Strategy (RSS) identified the Natural Soundscape as a priority resource (NPS 2018). A high priority stewardship activity included collecting baseline acoustic data, which resulted in a Technical Assistance request to NSNSD in 2017 (TAR 4881). This study describes the outcome of that request.)--! **
+:::
+:::{custom-style="sr Heading 2"}
+Study Area 
+:::
+
+```{r sitesum store, include=FALSE}
+
+# --- Normalize season labels ---
+exec_sum <- exec_sum %>%
+  mutate(Season = tolower(Season))
+
+# --- Summary counts and ranges ---
+n_sites    <- exec_sum %>% distinct(`Site Name`) %>% nrow()
+n_seasons  <- exec_sum %>% distinct(Season) %>% nrow()
+year_range <- range(exec_sum$Year, na.rm = TRUE)
+
+# --- Site-level summary text ---
+# FIXED: "times" was previously hardcoded regardless of visit count,
+# which would read "visited 1 times" for a single-visit site. Now
+# matches the conditional singular/plural handling Step3 already had.
+site_text <- exec_sum %>%
+  group_by(`Site Name`) %>%
+  summarise(
+    visits  = n(),
+    seasons = paste(unique(Season), collapse = ", "),
+    years   = paste(unique(Year),   collapse = ", ")
+  ) %>%
+  mutate(time_word = ifelse(visits > 1, "times", "time")) %>%
+  mutate(text = glue("Site {`Site Name`} was visited {visits} {time_word} across {seasons} in {years}.")) %>%
+  pull(text)
+
+# --- Report summary text ---
+summary_text_1 <- glue(
+  "This report covers results from an acoustic inventory conducted at {n_sites} sites over {n_seasons} seasons"
+)
+summary_text_2 <- paste(site_text, collapse = " ")
+
+# --- Output ---
+summary_text_1
+summary_text_2
+
+```
+
+:::{custom-style="sr Normal"}
+`r (summary_text_1)` `r (daterange_text)` (Table `r (site_meta)`, Figure `r (map)`). `r (summary_text_2)`
+:::
+
+:::{custom-style="sr Table caption"}
+Table `r (site_meta)`. Metadata for acoustical monitoring sites at `r (park)`, `r (daterange_text)`. 
+:::
+
+```{r siteinfo, echo=FALSE, ft.align="center", out.width = '70%'}
+
+# sitemeta was already loaded once in the params-store chunk above -
+# reused here rather than re-read from disk.
+mat <- data.frame(sitemeta, check.names = FALSE)
+
+# --- Format metadata table with flextable ---
+ft <- flextable(mat) %>% 
+  align(j = 1:2, align = "left",  part = "all") %>%   # Left-align first two columns
+  align(j = 3:8, align = "left",  part = "all") %>%   # Left-align columns 3–8
+  fontsize(size = 9, part = "header") %>%             # Header font size
+  bold(part = "header") %>%                           # Bold header
+  fontsize(size = 9, part = "body") %>%               # Body font size
+  padding(padding = 0.5, part = "all") %>%            # Cell padding
+  autofit() %>%                                       # Auto-fit columns
+  border_outer() %>%                                  # Outer border
+  border_inner()                                      # Inner borders
+
+# Set table width to 70% of page
+ft <- set_table_properties(ft, width = 0.7, layout = "autofit")
+
+# --- Output flextable ---
+ft
+
+
+
+```
+
+
+<br>
+
+
+```{r genmap, echo=FALSE, results='asis', ft.align="center"}
+
+# FIXED: see include_graphics_ar() note in the "packages" chunk - this
+# chunk previously used out.width='100%' at the chunk-option level,
+# which distorted the site map's aspect ratio in Word (a landscape or
+# portrait map forced into a fig.width x fig.height box unrelated to its
+# actual shape). Both fallback paths (site_map_path / map_path) now go
+# through include_graphics_ar() instead.
+# --- Include park geographic location map ---
+map_path <- paste(park.image.folder, "park_geographic_location.png", sep = "")
+site_map_path <- paste0(park.image.folder, pcode, "_SiteMap.png")
+if (file.exists(site_map_path)) {
+  include_graphics_ar(site_map_path, 1.0)
+} else if (file.exists(map_path)) {
+  include_graphics_ar(map_path, 1.0)
+} else {
+  message("No site map found at either: ", site_map_path, " or ", map_path, " - map figure will be omitted.")
+}
+
+```
+
+:::{custom-style="sr Figure caption"}
+Figure `r (map)`. Study `r (site_s)` in `r (park)`, `r (state)`, USA.
+:::
+
+:::{custom-style="sr Image credit"}
+NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION
+:::
+
+:::{custom-style="sr Alternate text"}
+Figure `r (map)`. Study `r (site_s)` in `r (park)`, `r (state)`, USA. **!-- Reminder:UPDATE TEXT USING THIS AS AN EXAMPLE: This map shows the boundary of the park, a road that borders the north-northeast boundary, and a railroad at the southern tip of the boundary. Within the park boundary, the `r (sitenumword)` study `r (site_s)` are labeled at their location and a grey polygon displays the Wilderness boundary.** 
+:::
+
+
+
+<br>
+
+:::{custom-style="sr Heading 1"}
+Methods 
+:::
+
+:::{custom-style="sr Heading 2"}
+Automatic Monitoring 
+:::
+
+:::{custom-style="sr Normal"}
+A Larson Davis sound level meter (SLM) type 831-A was deployed at `r (sitenumword)` monitoring `r (site_s)`. The SLM is a hardware-based, real-time analyzer which constantly records one-third octave band sound pressure level (SPL) data. This Larson Davis-based site met American National Standards Institute (ANSI) Type 1 standards (ANSI 1968 [R2020], 1983 [R2006], 1992 [2018]) for accurate survey-grade instrumentation. The sound level meter provided the information needed to calculate metrics described below in Calculation of Metrics. 
+
+Acoustic monitoring equipment is used by many practitioners to determine noise levels in different environments, both indoors and outdoors. The NPS uses equipment like that used by other practitioners but has developed a unique configuration that stands up to the potentially harsh environment encountered in national parks (National Park Service 2013). The microphone with environmental shroud was set up on a tripod at 1.5 m above the ground, which approximates the average height of the human ear. The digital audio recorder recorded continuous audio through the entire monitoring period (see details below on the acoustic record). An anemometer was attached to a tripod and placed approximately 2-3 m from the microphone to capture local wind conditions. 
+
+The sampling station consisted of: 
+:::
+
+:::{custom-style="sr List Bullet L1"}
+
+  Type 1 sound level meter 
+  
+  Microphone with environmental shroud
+  
+  Preamplifier 
+  
+  12 V battery pack 
+  
+  Ultrasonic anemometer (wind speed) 
+  
+  Digital audio recorder 
+
+::: 
+
+:::{custom-style="sr Normal"}
+The sampling station was designed to collect: 
+:::
+
+:::{custom-style="sr List Bullet L1"}
+
+  Flat-weighted, time-average sound level (L~Zeq,~~1s~) for each one-third octave frequency band, 12.5 – 20,000 Hz in dB re 20 µPa [collected by Type 1 sound level meter].
+  
+  A-weighted, time-average sound level (L~Aeq,~~1s~~[12.5~~–~~20000 Hz]~) in dB re 20 µPa [collected by Type 1 sound level meter].
+  
+  Continuous meteorological data for wind speed [collected by anemometer].
+  
+  Continuous digital audio recordings.
+
+:::
+
+
+:::{custom-style="sr Heading 2"}
+
+Monitoring Period 
+:::
+
+:::{custom-style="sr Normal"}
+It is typical to monitor a minimum of 25 days to capture daily differences within a sampling period that occur at each site within a reasonable margin of error (NPS 2005). For this study, the monitoring period was `r (days_summary)`.
+:::
+
+```{r lnat_text, include=FALSE}
+
+# --- Define LNAT explanatory text based on parameter flag ---
+lnat_text1 <- ifelse(
+  either_splat_listen == TRUE,
+  "The L~A50~ is the preferred metric to represent prevailing acoustic conditions. The natural ambient (L~Anat~) is an estimate of what the sound levels for a site would be if all human-caused noise sources were removed. L~Anat~ is the preferred metric to represent baseline or reference conditions.",
+  "**Due to X, L~Anat~ was not calculated**"
+)
+
+lnat_text2 <- ifelse(
+  either_splat_listen == TRUE,
+  "For a given hour (or other specified time period), L~Anat~ is calculated to be the sound level exceeded x percent of the time, where x is defined by equation (1):",
+  ""
+)
+
+eq_cap_a <- ifelse(
+  either_splat_listen == TRUE,
+  "The natural ambient sound level equals one hundred minus the percentage of samples containing noise for a given hour divided by two, plus the percentage of samples containing noise for that same hour.",
+  ""
+)
+
+lnat_text3 <- ifelse(
+  either_splat_listen == TRUE,
+  "where
+P~H~ = percentage of samples containing noise for the hour.
+
+For example, if human-caused sounds are present 30% of the hour, x = 65, and the L~Anat~ is equal to the L~65~, or the level exceeded 65% of the time. To summarize and display these data, the median of the hourly L~Anat~ values for the daytime hours (0700–1900) and the median of the hourly L~Anat~ values for the nighttime (1900–0700) are displayed in graphical format in the following sections.",
+  ""
+)
+
+lnat_head <- ifelse(
+  either_splat_listen == TRUE,
+  "Off-Site Listening and Spectrogram Analysis",
+  ""
+)
+
+```
+
+:::{custom-style="sr Heading 2"}
+Calculation of Metrics 
+:::
+
+:::{custom-style="sr Normal"}
+The status of the acoustical environment can be characterized by sound level (L~A50~, L~Anat~, L~A90~, L~A10~, L~Aeq~) and frequency content, and event durations (through off-site listening). NPS uses descriptive figures and metrics to interpret these characteristics.
+
+Two fundamental descriptors are existing ambient (L~A50~) and natural ambient (L~Anat~) sound levels. These are both examples of percentile levels, where each L~x~ value refers to the sound level that is exceeded x % of the time. The L~A50~ represents the median sound level and is drawn from a full dataset (removing data with wind speed > 5m/s to eliminate error from microphone distortion). `r (lnat_text1)` 
+
+`r (lnat_text2)` 
+:::
+```{r equation, echo=FALSE, results='asis', ft.align="center", eval=either_splat_listen}
+
+# FIXED: see include_graphics_ar() note in the "packages" chunk - was
+# out.width = '30%' at the chunk-option level, now routed through the
+# aspect-ratio-preserving helper instead.
+# --- Include LNAT equation image ---
+lnat_eq_path <- paste0(park.image.folder, "lnatequation.png")
+if (file.exists(lnat_eq_path)) {
+  include_graphics_ar(lnat_eq_path, 0.30)
+} else {
+  message("lnatequation.png not found at: ", lnat_eq_path, " - equation image will be omitted.")
+}
+
+
+```
+
+:::{custom-style="sr Alternate text"}
+`r (eq_cap_a)` 
+:::
+:::{custom-style="sr Normal"}
+`r (lnat_text3)` 
+:::
+
+:::{custom-style="sr Heading 1"}
+`r (lnat_head)`
+:::
+
+```{r lc_text, include=FALSE}
+
+# --- Listening Center / SPLAT analysis period (days) -------------------
+# Reads analysisdays_<season>.csv (written by Step1 directly from each
+# site's own metrics file header - e.g. "Listening Center Detailed Event
+# Audibility (%), Summer (n = 9 days)") for every folder currently in
+# report scope, and collapses across all of them (and all sites within
+# each) into a single number if every value agrees, or a "min-max"
+# range otherwise. Falls back to the original manual reminder text if
+# the CSV/column can't be found (e.g. a report folder produced before
+# this feature existed, or Step1 hasn't been re-run for it yet).
+parse_days_range <- function(x) {
+  # FIXED: read.csv() infers column type from CONTENT, not from
+  # stringsAsFactors - a DaysText value that happens to be a plain
+  # number with no dash (e.g. "9", written whenever every site agreed
+  # on the same day count) gets auto-parsed as NUMERIC on read-back,
+  # regardless of stringsAsFactors. strsplit() does not auto-coerce
+  # numeric input the way most functions do, so this crashed with
+  # "non-character argument" specifically for the (common) case where
+  # a season's sites all agreed on one day count. as.character() here
+  # is a defensive second layer - the primary fix is forcing
+  # colClasses on the read.csv() call in collect_days_across_scope()
+  # below, so this coercion should normally be a no-op.
+  x <- as.character(x)
+  if (is.na(x) || !nzchar(x)) return(numeric(0))
+  parts <- suppressWarnings(as.numeric(strsplit(x, "-", fixed = TRUE)[[1]]))
+  parts[!is.na(parts)]
+}
+
+collect_days_across_scope <- function(type_label) {
+  vals <- numeric(0)
+  for (i in seq_along(datafolders)) {
+    days_path <- paste0(datafolders[[i]], "/analysisdays_", seasons[[i]], ".csv")
+    if (!file.exists(days_path)) next
+    # colClasses forces both columns to stay character regardless of
+    # whether DaysText's content happens to look numeric (see note in
+    # parse_days_range above) - this is the actual fix; the
+    # as.character() in parse_days_range is just a backstop.
+    dd <- tryCatch(read.csv(days_path, stringsAsFactors = FALSE,
+                            colClasses = c(Type = "character", DaysText = "character")),
+                   error = function(e) NULL)
+    if (is.null(dd) || !all(c("Type", "DaysText") %in% names(dd))) next
+    row <- dd$DaysText[dd$Type == type_label]
+    if (length(row) == 1) vals <- c(vals, parse_days_range(row))
+  }
+  vals
+}
+
+format_days_text <- function(x) {
+  if (length(x) == 0) return(NULL)
+  rng <- range(x)
+  if (rng[1] == rng[2]) as.character(rng[1]) else paste0(rng[1], "-", rng[2])
+}
+
+lc_days_text <- format_days_text(collect_days_across_scope("ListeningCenter"))
+lc_days_display <- if (!is.null(lc_days_text)) lc_days_text else "**!-- Reminder:UPDATE DATA (METRICS FILES) --!  9-11**"
+
+# --- Listening Center section header ---
+lc_head <- ifelse(offlisten_a == TRUE, "Listening Center Software Analysis", "")
+
+# --- Off-site listening methodology text ---
+lc_text <- ifelse(
+  offlisten_a == TRUE,
+  paste0(
+    "Off-site analysis is completed by listening to the audio record while simultaneously viewing its spectrogram representation. Auditory analysis was used to calculate the audibility of sound sources at each location. Trained technicians at Colorado State University (Figure 2) listened back to ",
+    lc_days_display,
+    " days of the audio record. Technicians considered only a subsample of each day representing the first 10 seconds of every two-minute period. Within each subsample every audible sound source was categorized. This allowed the temporal extent of audibility for each source type to be estimated. The total percent time noise was audible was then used to calculate the natural ambient sound level (L~Anat~) for each hour (see Equation 1 above for more information). For any off-site audio playback listening techniques, Bose Quiet Comfort Noise Canceling headphones were used to minimize limitations imposed by the office acoustical environment."
+  ),
+  ""
+)
+
+# --- Image caption for Listening Center figure ---
+# Caption text also adapts to whether the combined SPLAT image is
+# actually being shown (see the "listener" chunk below), rather than
+# always describing only the Listening Center software.
+listener_shows_splat <- splat_a && file.exists(paste0(park.image.folder, "listenerimage_with_splat.png"))
+
+lc_img_cap <- ifelse(
+  either_splat_listen == TRUE,
+  ifelse(listener_shows_splat,
+    paste0("Figure ", listener, ". Depictions of auditory analysis by trained technicians. The top image (A) shows a Colorado State University student identifying sound sources using Listening Center software (NPS). The bottom image (B) is a screen shot of NPS Sound Pressure Level Annotation Tool (SPLAT) software with an annotated noise event."),
+    paste("Figure ", listener, " . A Colorado State University student identifies sound sources using Acoustic Monitoring Toolbox (NPS) software.", "")
+  ),
+  ""
+)
+
+# --- Image credit ---
+lc_img_cr <- ifelse(
+  either_splat_listen == TRUE,
+  "NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION",
+  ""
+)
+
+# --- Alt text for accessibility ---
+lc_img_alt <- ifelse(
+  either_splat_listen == TRUE,
+  ifelse(listener_shows_splat,
+    paste0("Figure ", listener, ". Depictions of auditory analysis by trained technicians. The top image (A) shows a Colorado State University student identifying sound sources using Listening Center software (NPS), wearing headphones and visually analyzing spectrograms on two computer screens. The bottom image (B) is a screen shot of NPS Sound Pressure Level Annotation Tool (SPLAT) software with an annotated noise event, showing a bounding box drawn around the event on a spectrogram display."),
+    paste("Figure ", listener, " . A Colorado State University student identifies sound sources using Acoustic Monitoring Toolbox (NPS) software. The student is wearing headphones and visually analyzing spectrograms on two computer screens.", "")
+  ),
+  ""
+)
+
+```
+
+:::{custom-style="sr Heading 2"}
+`r (lc_head)`
+:::
+
+:::{custom-style="sr Normal"}
+`r (lc_text)` 
+:::
+
+```{r listener, echo=FALSE, results='asis', ft.align="center",eval=either_splat_listen}
+
+# FIXED: this previously always pointed at "listenerimage.png" even when
+# listener_shows_splat (computed in the "lc_text" chunk above, based on
+# whether listenerimage_with_splat.png actually exists) was TRUE - so the
+# combined Listening Center + SPLAT image was never actually shown, even
+# though its caption/alt-text (which correctly describes two sub-images,
+# A and B) already assumed it would be. Now the image path follows the
+# same flag the caption/alt-text already used.
+# FIXED (separately): see include_graphics_ar() note in the "packages"
+# chunk - was out.width = '60%' at the chunk-option level, now routed
+# through the aspect-ratio-preserving helper instead.
+listener_img_path <- if (listener_shows_splat) {
+  paste0(park.image.folder, "listenerimage_with_splat.png")
+} else {
+  paste0(park.image.folder, "listenerimage.png")
+}
+
+if (file.exists(listener_img_path)) {
+  include_graphics_ar(listener_img_path, 0.60)
+} else {
+  message(basename(listener_img_path), " not found at: ", listener_img_path, " - listener figure will be omitted.")
+}
+
+```
+
+:::{custom-style="sr Figure caption"}
+`r (lc_img_cap)`
+:::
+:::{custom-style="sr Image credit"}
+`r (lc_img_cr)`
+:::
+
+:::{custom-style="sr Alternate text"}
+`r (lc_img_alt)` 
+:::
+```{r splat_text, include=FALSE}
+
+# --- SPLAT analysis period (days) - same aggregation approach as
+# lc_days_text above (see "lc_text" chunk); reads the "SPLAT" row
+# instead of "ListeningCenter" from each analysisdays_<season>.csv.
+splat_days_text <- format_days_text(collect_days_across_scope("SPLAT"))
+splat_days_display <- if (!is.null(splat_days_text)) paste0("~", splat_days_text) else "**!-- Reminder:UPDATE DATA (METRICS FILES)--! ~52**"
+
+# --- SPLAT section header ---
+splat_head <- ifelse(splat_a == TRUE, "Sound Pressure Level Annotation Tool", "")
+
+# --- SPLAT methodology text ---
+splat_text <- ifelse(
+  splat_a == TRUE,
+  paste0(
+    "Sound pressure level data was annotated visually across ",
+    splat_days_display,
+    " days of spectrograms using the NPS-developed software, Sound Pressure Level Annotation Tool (SPLAT). Trained technicians used SPLAT to draw bounding boxes at the beginning and end of noise events using visual cues from the sound pressure energy, time, and frequency of a spectrogram. From the drawn bounding boxes, noise event counts (i.e., the number of boxes), and noise duration (i.e., the length of each box) were obtained. In addition, the noise-free interval (NFI) metric was generated. The NFI represents the length of time that passes between the end of one noise event and the beginning of the next. Over a longer sampling period, the median of NFI can describe how a typical opportunity for solitude has been fragmented by noise (Poling and Betchkal 2023). Like the Listening Center software, the total percent time noise was audible was then used to calculate the natural ambient sound level (L~Anat~) for each hour."
+  ),
+  ""
+)
+```
+
+:::{custom-style="sr Heading 2"}
+`r (splat_head)`
+:::
+:::{custom-style="sr Normal"}
+`r (splat_text)` 
+:::
+```{r onlisten_text, include=FALSE}
+
+# --- On-site Listening section header ---
+onlisten_head <- ifelse(onlisten_a == TRUE, "On-Site Listening", "")
+
+# --- On-site listening methodology text ---
+onlisten_text <- ifelse(
+  onlisten_a == TRUE,
+  "In addition to sound pressure level and audio data, knowledge of the type, context, duration, and distribution of sound sources is crucial for characterizing natural and non-natural acoustic conditions. This information can be acquired during periods of observer data collection, called on-site listening. During an on-site listening session, one inconspicuously listens to the soundscape and takes note of all audible events as they occur. For this technique, an observer sits quietly at a location at least 15 m from the acoustic monitor for one hour. At the top of the hour and once the observer is acclimated to the listening area, each sound heard is entered into a handheld device. Sound type, event count, and event duration are calculated from these sessions.",
+  ""
+)
+```
+:::{custom-style="sr Heading 2"}
+`r (onlisten_head)`
+:::
+
+:::{custom-style="sr Normal"}
+`r (onlisten_text)`
+::: 
+
+:::{custom-style="sr Heading 1"}
+Results 
+:::
+:::{custom-style="sr Heading 2"}
+Frequency content
+:::
+
+:::{custom-style="sr Normal"}
+To determine the effect that noise has on the acoustic environment, it is useful to examine percentile metrics across a frequency range. High frequency sounds (such as a cricket chirping) and low frequency sounds (such as flowing water) often occur simultaneously, so the frequency spectrum is split into 33 narrower bands, each encompassing one-third of an octave. These narrow bands closely represent how humans distinguish between frequencies of sound. The percentile sound levels for 33 one-third octave band frequencies over the day and night periods are shown in Figure `r (frecont_fig_start)` – Figure `r (frecont_fig_end)`. 
+
+Examining the sound energy in each one-third octave band (combined with digital audio recordings) allows acoustic technicians to determine what types of sounds are contributing to the overall sound levels at a site. The grayed areas of Figure `r (frecont_fig_start)` – Figure `r (frecont_fig_end)` represent sound levels outside of the typical range of human hearing. The percentile levels (L~x~) are also shown for each one-third octave band. They represent the sound levels exceeded x  percent of the measurement period. For example, L~90~ is the sound level that has been exceeded 90% of the time, and only the quietest 10% of the samples can be found below this point. On the other hand, the L~10~ is the sound level that has been exceeded 10% of the time, and 90% of the measurements are quieter than the L~10~. The bold portion of the column represents the difference between L~50~ and L~nat~. The height of this bold portion is a measure of the contribution of anthropogenic noise to the existing sound levels at this site. The size of this portion of the column is directly related to the percent time that human caused sounds are audible. When bold portions of the column do not appear the natural and existing sound levels were either very close to each other or were equal. The typical frequency levels for transportation, conversation, and songbirds are presented on the figure as examples for interpretation of the data. These ranges are estimates and are not vehicle-, species-, or habitat-specific. 
+:::
+
+
+
+```{r freqpng, echo=FALSE, fig.cap=paste("Your caption."), message=FALSE, warning=FALSE, include=TRUE, results='asis'}
+# Reuse frecontlist directly (already computed in the "table numbering"
+# chunk from the folder-scope-FILTERED `dirs`) instead of an independent
+# re-scan - keeps the file list and figure-number list always in sync.
+freqpngfiles <- frecontlist
+imagename <- basename(freqpngfiles)
+figsites <- sub("_.*", "", imagename)
+# FIXED: season extracted from the filename is stored in Title Case
+# (e.g. "Summer") since that's how Step1 names folders/files - but every
+# sentence below uses it mid-sentence ("... at SITE in summer, YEAR."),
+# never at the start, so it should read lowercase. Lowering it once here
+# at extraction (rather than at each usage below) keeps this consistent.
+figseasons <- tolower(sub("^[^_]*_([^_]*)_.*$", "\\1", imagename))
+figyears<- sub(".*_(\\d{4})/.*$", "\\1", freqpngfiles)
+
+total_figures <- length(freqpngfiles)
+
+# NOTE ON STYLING: each caption/credit/alt-text block below is wrapped in
+# the SAME Pandoc fenced-div syntax used successfully elsewhere in this
+# document (via the styled_block() helper defined in the "packages"
+# chunk), instead of a plain-text "please format this by hand" reminder.
+for (i in 1:total_figures) {
+  f <- freqpngfiles[i]
+
+  cat(paste0("![](", f, ")\n\n"))
+
+  styled_block("sr Figure caption",
+    "Figure ", frecont_fig_list[[i]], ". Day and night percentile sound pressure levels for 33 one-third octave bands at ",
+    figsites[i], " in ", figseasons[i], ", ", figyears[i],
+    ". For each bar, the bold color indicates the range of existing (L~50~; upper) and natural (L~nat~; lower) sound pressure levels."
+  )
+
+  styled_block("sr Image credit", "NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION")
+
+  styled_block("sr Alternate text",
+    "Figure ", frecont_fig_list[[i]], ". Day and night percentile sound pressure levels for 33 one-third octave bands at ",
+    figsites[i], " in ", figseasons[i], ", ", figyears[i],
+    ". This graph displays sound pressure level in decibels on the y-axis and frequency in hertz on the x-axis. A greyed-out portion of the graph depicts the threshold of human hearing. Octave bands where transportation and songbirds are audible are noted. For each bar that exists for each octave band, measured sound level percentiles are displayed for daytime in yellow-orange and nighttime in pink-purple. The upper and lower bounds of each bar display the tenth and ninetieth percentiles. Within that bar, a bold section (orange and purple) displays the median and natural sound levels. **!-- Reminder:UPDATE EXAMPLE TEXT--!  This bold color indicates the range of existing and natural sound pressure levels and indicates the measured noise impact. This graph depicts a signal for transportation during the day and a weak signal for dusk and dawn bird chorus.**"
+  )
+
+  cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
+}
+```
+
+
+:::{custom-style="sr Heading 2"}
+Sound level: Time Above  
+:::
+
+:::{custom-style="sr Normal"}
+To understand how acoustic conditions in the park might affect visitors, measured sound levels are compared to sound levels of interest. Specifically, Table 5 reports the percent of time that measured sound levels (L~Aeq,~~1s~) were above four key functional effect levels during the monitoring periods (daytime and nighttime). The top value in each split-cell uses the full frequency range, whereas the bottom values report the percentage of the sample that ANS-weighted sound levels (20 – 1,250 Hz) were above functional effect thresholds. Most motorized human-caused noise is confined to the truncated, lower-frequency range, while many natural sounds, including insects and birds, are higher in pitch. ANS weighting eliminates high-frequency sound (leaf rustle, and biologic sounds) allowing for more accurate comparisons of low-frequency ambient sound levels across different land use types (e.g. urban, protected areas; ANSI S3/SC1.100, 2014 [R2020]). This frequency weighting scheme improves ambient sound level measurements in quiet environments.
+
+The first functional effect in Table `r (ta_tab_start_2)` occurs around 35 dB (L~Aeq,~~1s~), which is designed to address the health effects of sleep interruption. Studies suggest that sound events as low as 35 dB can have adverse effects on blood pressure in sleeping humans (Haralabidis et al. 2008). This is also the desired background sound level in classrooms (ANSI S12.60-2002 [R2012]). For application to the present study, the 35 dB (L~Aeq,~~1s~) effect level was exceeded at **!-- Reminder:UPDATE SITE (CHOOSE SITE OF INTEREST FROM TABLE) --! `r (pcode)`00X 16.74 %** of the time during the day and **!-- Reminder:UPDATE DATA (FROM TABLE) --! 3.31 %** of the time at night in the full frequency range. In the 20 – 1,250 Hz range, the 35 dB functional sound level value **!-- Reminder:UPDATE TEXT (DESCRIBE DATA FROM SITE CHOSEN) --! was very rarely exceeded in daytime or nighttime.** The second functional effect is expected to occur around 45 dB (L~Aeq,~~1s~). It addresses the World Health Organization's recommendations that noise levels inside bedrooms remain below 45 dB (L~Aeq,~~1s~) (Berglund et al. 1999). The third functional effect is expected to occur around 52 dB (L~Aeq,~~1s~), based on the EPA's speech interference threshold for speaking in a raised voice to an audience at 10 meters (EPA 1974). This threshold addresses the effects of sound on interpretive presentations in parks. The final functional effect at 60 dB (LAeq,1s), provides a basis for estimating impacts on normal voice communications at 1 meter. Visitors viewing scenic areas in the park regularly conduct such conversations.
+:::
+
+```{r timeabove2, echo=FALSE, results='asis',ft.align="center",out.width = '100%'}
+# --- Time-above sound level tables (Main Report copy) - same
+# table_groups logic as the "timeabove1" chunk above.
+for (g in seq_along(table_groups)) {
+  grp <- table_groups[[g]]
+
+  group_rows <- lapply(grp$indices, function(i) {
+    datapath <- paste(datafolders[[i]], "/timeabove_", seasons[[i]], ".csv", sep = "")
+    d <- read.csv(datapath)
+    d <- d[, c(1:10)]
+    colnames(d) <- c("Site Name", "Frequency Range", " 35 dB", " 45 dB", " 52 dB", " 60 dB", "35 dB ", "45 dB ", "52 dB ", "60 dB ")
+    if (combine_tables_by_season) {
+      d$Year <- years[[i]]
+      d <- d[, c("Site Name", "Year", setdiff(names(d), c("Site Name", "Year")))]
+    }
+    d
+  })
+  data <- bind_rows(group_rows)
+
+  fixed_cols <- c("Site Name", "Frequency Range")
+  if (combine_tables_by_season) fixed_cols <- c(fixed_cols, "Year")
+  db_cols <- setdiff(names(data), fixed_cols)
+
+  # Create a flextable from the data frame and format it
+  tb <- flextable(data) %>% 
+    align(j = c("Site Name", "Frequency Range"), align = "left", part = "all") %>%
+    align(j = db_cols, align = "left", part = "all") %>%
+    fontsize(size = 9, part = "header") %>%                # Set font size for header
+    bold(part = "header") %>%                               # Make header bold
+    fontsize(size = 9, part = "body") %>%                   # Set font size for body
+    padding(padding = 0.5, part = "all") %>%               # Add padding around all cells
+    autofit() %>%                                           # Autofit the table size to content
+    border_outer() %>%                                      # Add outer border
+    border_inner() %>%                                      # Add inner borders
+    style(pr_p = officer::fp_par(word_style = "sr Table header"), part = "header") %>%
+    style(pr_p = officer::fp_par(word_style = "sr Table cell"), part = "body")
+
+  if (combine_tables_by_season) {
+    tb <- align(tb, j = "Year", align = "left", part = "all")
+  }
+  
+  first_block_width <- length(fixed_cols)
+  header_values <- c(
+    "", 
+    "Time above sound level (% of daytime hours, 07:00 to 19:00)", 
+    "Time above sound level (% of nighttime hours, 19:00 to 07:00)"
+  )
+  header_widths <- c(first_block_width, 4, 4)
+  tb <- add_header_row(x = tb, values = header_values, colwidths = header_widths)
+  
+  styled_block("sr Table caption",
+    "Table ", ta_tab_list_2[[g]], ". Percent time above metrics for acoustic records collected in ", 
+    park, " (", pcode, ") in ", grp$season_label, ", ", grp$year_label, 
+    ". Sound level functional values are displayed in decibels (dB LAeq, 1s re 20 µPa). The percent of time ANS-weighted sound levels (20 – 1,250 Hz) are above functional values."
+  )
+  
+  # Output the flextable in RMarkdown format
+  flextable_to_rmd(tb)
+  # Add spacing between tables
+cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
+}
+```
+
+<br>
+
+:::{custom-style="sr Heading 2"}
+Sound Level: Percentile Levels
+:::
+
+:::{custom-style="sr Normal"}
+To understand the range of acoustic conditions at the park, percentile sound levels are reported (Table `r (amb_sum_tab_start)` **- Table `r (amb_sum_tab_end)`**, Figure `r (hourly_fig_start)`** – Figure `r (hourly_fig_end)`**).** In Figure `r (hourly_fig_start)` the A-weighted percentile sound levels (L~A90~, L~Anat~, L~A50~, and L~A10~) for **!-- Reminder:UPDATE SITE (CHOOSE SITE OF INTEREST) --!  `r (pcode)`00X** are shown. The hourly percentile sound levels are calculated from the broadband (12.5 Hz – 20 kHz) A-weighted, 1-second time averaged sound levels (L~Aeq,~~1s~) within each hour of the day. For instance, in Figure `r (hourly_fig_start)`, the L~A50~ (median) sound level for **!-- Reminder:UPDATE SITE (CHOOSE SITE OF INTEREST) --!  `r (pcode)`00X** during the **!-- Reminder:UPDATE HOURS (METRICS FILE) --!  8:00 hour is 19.1 dB**. On the other hand, the sound level exceeded 10% of the time (L~A10~) for the same hour at this site is **!-- Reminder:DB (METRICS FILE) --!  26.6** dB, meaning 90% of the measurement period is quieter. Hours where the L~A50~ and the L~Anat~ differ the most are usually hours with the most human-caused noise, as shown with site **!-- Reminder:UPDATE SITE (CHOOSE SITE OF INTEREST) --! `r (pcode)`00X (Figure X)**. The larger the span of the black bars, the greater the difference of the existing sound level from natural conditions. At **!-- Reminder:UPDATE TEXT RELEVENT TO SITE --! `r (pcode)`00X, existing sound levels are closest to natural conditions in the early morning hours but depart from natural conditions for most of the day (Figure X). In general, higher natural ambient sound levels occurred in the late evening and early morning hours and are largely due to insect and bird activity (Figures X – X).**
+
+:::
+
+```{r percentiles, echo=FALSE, results='asis', ft.align = "center", out.width = '100%'}
+
+# --- Percentile Levels tables across table_groups (see "timeabove1"
+# chunk above for the same combine/separate logic).
+for (g in seq_along(table_groups)) {
+  grp <- table_groups[[g]]
+
+  group_rows <- lapply(grp$indices, function(i) {
+    datapath <- paste(datafolders[[i]], "/ambfullsum_", seasons[[i]], ".csv", sep = "")
+    d <- read.csv(datapath)
+    # FIXED: Step1 writes ambfullsum_<season>.csv with columns in the
+    # order Time, SiteID, LA10, LA50, LAnat, LA90 (see
+    # amb_full_all <- amb_full_all[, c("Time","SiteID",...)] in Step1).
+    # Reading straight through as d[, c(1:6)] and then labeling column 1
+    # "Site Name" meant Site Name/Time were SWAPPED relative to the
+    # actual data - the table's "Site Name" column literally held each
+    # row's Time value ("Day"/"Night") and vice versa. Reordering to
+    # (2,1,3:6) here puts SiteID first before the rename below, matching
+    # the labels to the data they actually describe.
+    d <- d[, c(2,1,3:6)]
+    colnames(d) <- c("Site Name", "Time", "LA10", "LA50", "LAnat", "LA90")
+    if (combine_tables_by_season) {
+      d$Year <- years[[i]]
+      d <- d[, c("Site Name", "Year", setdiff(names(d), c("Site Name", "Year")))]
+    }
+    d
+  })
+  data <- bind_rows(group_rows)
+
+  other_cols <- setdiff(names(data), "Site Name")
+
+  # Create a flextable from the data frame and format it
+  tb <- flextable(data) %>% 
+    align(j = "Site Name", align = "left", part = "all") %>%
+    align(j = other_cols, align = "left", part = "all") %>%
+    fontsize(size = 9, part = "header") %>%              # Set font size for header
+    bold(part = "header") %>%                             # Make header bold
+    fontsize(size = 9, part = "body") %>%                 # Set font size for body
+    padding(padding = 0.5, part = "all") %>%             # Add padding around all cells
+    autofit() %>%                                         # Autofit the table size to content
+    border_outer() %>%                                    # Add outer border
+    border_inner() %>%                                    # Add inner borders
+    style(pr_p = officer::fp_par(word_style = "sr Table header"), part = "header") %>%
+    style(pr_p = officer::fp_par(word_style = "sr Table cell"), part = "body")
+
+  # Compose header labels with subscripts BY COLUMN NAME rather than
+  # fixed position - needed because Year (when present) now sits at
+  # position 2, shifting Time/LA10/LA50/LAnat/LA90 over by one relative
+  # to the previous fixed j=3:6 indices.
+  la_labels <- list(LA10 = "A10", LA50 = "A50", LAnat = "Anat", LA90 = "A90")
+  for (col in names(la_labels)) {
+    j_idx <- which(names(data) == col)
+    tb <- compose(tb, i = 1, j = j_idx, part = "header",
+                  value = as_paragraph("L", as_sub(la_labels[[col]])))
+  }
+
+  styled_block("sr Table caption",
+    "Table ", amb_sum_tab_list[[g]], ". Summary of ", grp$season_label, " sound levels at ", 
+    park, " (", pcode, ") in ", grp$year_label,
+    ". Included for each site, 90^th^ percentile (L~A10~), existing (L~A50~), natural (L~Anat~) and 10^th^ percentile (L~A90~) ambient sound levels (dB re 20 µPa, A-weighted broadband, 12.5 Hz—20 kHz) during the day (0700-1900) and night (1900-0700)."
+  )
+  cat("\n") # Additional line breaks for clarity
+  cat("\n") # Additional line breaks for clarity
+  # Output the flextable in RMarkdown format
+  flextable_to_rmd(tb)
+  
+  # Add spacing between tables
+  cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
+}
+```
+
+
+<br>
+
+```{r hourpng, results='asis',fig.cap=paste("Your caption."), echo=FALSE, include=TRUE, warning=FALSE, message=FALSE}
+# List all files in the report directory matching the pattern 'DBAvHR'
+hourpngfiles <- hourlycontlist
+imagename <- basename(hourpngfiles)
+figsites <- sub("_.*", "", imagename)
+# See note on figseasons in the "freqpng" chunk above re: lowercasing at
+# extraction, since this is always used mid-sentence in captions below.
+figseasons <- tolower(sub("^[^_]*_([^_]*)_.*$", "\\1", imagename))
+figyears<- sub(".*_(\\d{4})/.*$", "\\1", hourpngfiles)
+
+for (i in seq_along(hourpngfiles)) {
+  f <- hourpngfiles[i]
+
+  cat(paste0("![](", f, ")\n"))
+
+  # FIXED: previously said "Median percentile sound levels" - but this
+  # figure shows FOUR percentile lines (L90/Lnat/L50/L10), only one of
+  # which (L50) is actually the median. Changed to "Hourly percentile
+  # sound levels" to accurately describe the whole figure.
+  styled_block("sr Figure caption",
+    "Figure ", hourly_fig_list[[i]], ". Hourly percentile sound levels (L~Aeq,~~1s~), in dB re 20 µPa, at ",
+    figsites[i], " in ", figseasons[i], ", ", figyears[i], "."
+  )
+
+  styled_block("sr Image credit", "NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION")
+
+  styled_block("sr Alternate text",
+    "Figure ", hourly_fig_list[[i]], ". Hourly percentile sound levels (L~Aeq,~~1s~), in dB re 20 µPa, at ",
+    figsites[i], " in ", figseasons[i], ", ", figyears[i],
+    ". A box and whisker plot depicting percentile sound levels on the y-axis and time of day by the hour on the x-axis. For each hourly box plot, the upper and lower whiskers display the tenth and ninetieth percentiles. The upper bound of the boxplot indicates the median sound level and the lower bound of the boxplot indicates the natural sound level. **!-- Reminder:UPDATE TEXT AND DATA--! This graph shows the largest impacts to the natural ambient sound level occur during the daytime.**"
+  )
+
+  cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
+}
+
+```
+
+:::{custom-style="sr Heading 2"}
+Event duration
+:::
+
+:::{custom-style="sr Heading 3"}
+Listening Center Software
+:::
+:::{custom-style="sr Normal"}
+Through off-site listening analysis, event duration for all audible sounds is calculated and averaged over the listening period. For both sites, mean hourly audibility was obtained for each hour of the day over an 8 to 10-day listening period **!-- Reminder:UPDATE --! (CSU 2021(cite listening output published to irma here))**. Hourly audibility is also displayed for all non-natural sources, while also highlighting the top two sources at each site (Figure `r (pa_fig_start)` – Figure `r (pa_fig_end)`)**. !-- Reminder:UPDATE --!  For example, `r (pcode)`00X, noise was audible nearly 100% across all hours of the day. During that time, ~aircraft were audible throughout the day but peaked at ~13:00 (Figure X). At ~`r (pcode)`00X, noise was audible more than ~90% of time across all hours of the day except from 02:00-05:00, and the primary contributor was motors (Figure X)**. 
+:::
+
+```{r top2, results='asis',fig.cap=paste("Your caption."), echo=FALSE, include=TRUE, warning=FALSE, message=FALSE}
+# List all files in the report directory matching the pattern 'top2'
+# Reuse pacontlist (folder-scope-filtered, computed in the "table
+# numbering" chunk) instead of an independent unfiltered re-scan.
+papngfiles <- pacontlist
+imagename <- basename(papngfiles)
+figsites <- sub("_.*", "", imagename)
+# See note on figseasons in the "freqpng" chunk above.
+figseasons <- tolower(sub("^[^_]*_([^_]*)_.*$", "\\1", imagename))
+figyears<- sub(".*_(\\d{4})/.*$", "\\1", papngfiles)
+
+for (i in seq_along(papngfiles)) {
+  f <- papngfiles[i]
+
+  cat(paste0("![](", f, ")\n"))
+
+  styled_block("sr Figure caption",
+    "Figure ", pa_fig_list[[i]], ". Hourly time audible for the top noise sources and all noise sources at ",
+    figsites[i], " in ", figseasons[i], ", ", figyears[i], "."
+  )
+
+  styled_block("sr Image credit", "NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION")
+
+  styled_block("sr Alternate text",
+    "Figure ", pa_fig_list[[i]], ". Hourly time audible for the top noise sources and all noise sources at ",
+    figsites[i], " in ", figseasons[i], ", ", figyears[i],
+    ". A bar chart depicts the percent time audible on the y-axis and time of day by the hour on the x-axis. A grey bar depicts the percent of time within an hour where noise is audible. Within that grey bar, the top noise sources are displayed in separate adjacent purple and salmon bars. Two noise sources are displayed unless only one prominent source is present at a site. **!-- Reminder:UPDATE EXAMPLE TEXT--! This graph shows noise is audible greater than 99% of the time at every hour of the day.**"
+  )
+
+  cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
+}
+
+```
+
+```{r splat_events_text, include=FALSE}
+
+# --- SPLAT Event Counts/Lengths + NFI section header and narrative text ---
+# Only renders if splat_a is TRUE and Step1 actually produced the
+# underlying CSVs/PNGs (splateventlist / nfilist, computed in the "table
+# numbering" chunk above).
+show_splat_events <- splat_a && length(splateventlist) > 0
+
+splat_events_head <- ifelse(show_splat_events, "Sound Pressure Level Annotation Tool", "")
+
+splat_events_text <- ifelse(
+  show_splat_events,
+  paste0(
+    "Event duration metrics were also obtained using the SPLAT technique. Mean hourly audibility of noise events was obtained for each hour of the day over the sampling period (Table ",
+    splat_tab_start, if (splat_tab_end != splat_tab_start) paste0("–", splat_tab_end) else "",
+    "). Table(s) ", splat_tab_start, if (splat_tab_end != splat_tab_start) paste0("–", splat_tab_end) else "",
+    " report, for each identified source, the mean number of events and mean event length observed during day and night hours. The noise-free interval (NFI) - the length of time between the end of one noise event and the beginning of the next - was also calculated for each hour of the day (Figure ",
+    if (length(nfi_fig_list) > 0) nfi_fig_start else "", if (length(nfi_fig_list) > 1) paste0(" – Figure ", nfi_fig_end) else "",
+    "). **!-- Reminder:UPDATE TEXT --! The median NFI across all hours of the day was X:XX (mm:ss). The lowest hourly median NFI occurred at XX:00 h, and the highest hourly median NFI occurred at XX:00 h.**"
+  ),
+  ""
+)
+```
+
+:::{custom-style="sr Heading 3"}
+`r (splat_events_head)`
+:::
+:::{custom-style="sr Normal"}
+`r (splat_events_text)`
+:::
+
+```{r splat_events_table, echo=FALSE, results='asis', eval=show_splat_events, ft.align="center", out.width='100%'}
+
+# Builds the SPLAT event counts/lengths table(s) from the
+# *_EventCountsLengths_*.csv files Step1 produces - one flextable per
+# site/season, in folder order (splateventlist is already re-sorted by
+# order number - see the "table numbering" chunk), with caption applied
+# via styled_block() (see note on the timeabove1 chunk above).
+
+tab_idx <- 1
+for (f in splateventlist) {
+  d <- tryCatch(read.csv(f, check.names = FALSE), error = function(e) NULL)
+  if (is.null(d) || nrow(d) == 0) next
+
+  site_id <- unique(d$SiteID)[1]
+  parent_folder <- basename(dirname(f))
+  # season_here/year_here are only ever used mid-sentence in the caption
+  # below - lowercased at extraction, matching figseasons elsewhere.
+  season_here <- tolower(str_match(parent_folder, "^\\d+_([A-Za-z]+)_\\d{4}$")[, 2])
+  year_here <- str_match(parent_folder, "^\\d+_[A-Za-z]+_(\\d{4})$")[, 2]
+
+  desc_col <- if ("Source Description" %in% names(d)) "Source Description" else names(d)[grepl("Description", names(d))][1]
+
+  out <- data.frame(
+    "Sound Source" = d[[desc_col]],
+    "Day Mean Event Count"    = round(d$Day_Count, 1),
+    "Day Mean Event Length"   = sec_to_mmss(d$Day_Length),
+    "Night Mean Event Count"  = round(d$Night_Count, 1),
+    "Night Mean Event Length" = sec_to_mmss(d$Night_Length),
+    check.names = FALSE
+  )
+
+  tb <- flextable(out) %>%
+    align(j = 1, align = "left", part = "all") %>%
+    align(j = 2:5, align = "center", part = "all") %>%
+    fontsize(size = 9, part = "header") %>%
+    bold(part = "header") %>%
+    fontsize(size = 9, part = "body") %>%
+    padding(padding = 0.5, part = "all") %>%
+    autofit() %>%
+    border_outer() %>%
+    border_inner() %>%
+    style(pr_p = officer::fp_par(word_style = "sr Table header"), part = "header") %>%
+    style(pr_p = officer::fp_par(word_style = "sr Table cell"), part = "body")
+
+  tb <- add_header_row(
+    x = tb,
+    values = c("", "Day", "Night"),
+    colwidths = c(1, 2, 2)
+  )
+
+  this_tab_num <- if (length(splat_tab_list) >= tab_idx) splat_tab_list[[tab_idx]] else splat_tab_start
+
+  styled_block("sr Table caption",
+    "Table ", this_tab_num,
+    ". Results from SPLAT analysis for ", site_id,
+    " in ", season_here, ", ", year_here,
+    ". Mean event counts and mean event lengths (mm:ss) are shown for each identified sound source, by day and night."
+  )
+
+  cat("\n\n")
+  flextable_to_rmd(tb)
+  cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
+  tab_idx <- tab_idx + 1
+}
+```
+
+```{r nfi_figs, results='asis', echo=FALSE, eval=show_splat_events && length(nfilist) > 0, warning=FALSE, message=FALSE}
+
+# Renders the per-site NFI time series plots Step1 already generates, in
+# folder order (nfilist is already re-sorted by order number - see the
+# "table numbering" chunk), with full figure caption / image credit /
+# alt text. NOTE: these plots now show median (50th percentile) and mean
+# only (previously also plotted 90th/10th percentile lines) - captions/
+# alt text below already reflect that.
+imagename <- basename(nfilist)
+figsites <- sub("_.*", "", imagename)
+figseasons <- tolower(sub("^[^_]*_([^_]*)_.*$", "\\1", imagename))
+
+for (i in seq_along(nfilist)) {
+  f <- nfilist[i]
+  cat(paste0("![](", f, ")\n"))
+
+  styled_block("sr Figure caption",
+    "Figure ", nfi_fig_list[[i]], ". Noise-free interval (NFI) by hour of day at ",
+    figsites[i], " in ", figseasons[i],
+    ". Lines show the median (50th percentile) NFI duration, and the mean NFI duration, for each hour."
+  )
+
+  styled_block("sr Image credit", "NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION")
+
+  styled_block("sr Alternate text",
+    "Figure ", nfi_fig_list[[i]], ". Noise-free interval by hour of day at ", figsites[i], " in ", figseasons[i],
+    ". A line chart depicts noise-free interval duration, in minutes and seconds, on the y-axis and time of day by the hour on the x-axis. Two lines are shown: the median (50th percentile) noise-free interval duration in solid color, and the mean noise-free interval duration as a black dashed line. **!-- Reminder:UPDATE TEXT --! Describe the pattern shown for this site (e.g. longer noise-free intervals overnight, shorter during peak daytime activity).**"
+  )
+
+  cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
+}
+```
+
+:::{custom-style="sr Heading 1"}
+Conclusions
+:::
+
+:::{custom-style="sr Normal"}
+Noise has the potential to affect a visitor's experience in parks by causing annoyance (Rapoza et al. 2015), reducing the perceived scenic beauty (Weinzimmer et al. 2014) and tranquility (Watts et al. 2020), and by limiting opportunities for solitude or a wilderness experience at this park. Increased sound levels may also have wide ranging effects on wildlife such as reduced predatory success (Mason et al. 2016), changes in vocal communication, and increased vigilance by keystone species (Shannon et al. 2014). In a review of literature addressing the effects of noise on wildlife published between 1990 and 2013, wildlife responses to noise were observed beginning at about 40 dB (L~Aeq~, as a composite of multiple metrics with varying time-averaging). Of the papers reviewed, 20% showed impacts to terrestrial wildlife at or below noise levels of 50 dB (L~Aeq,~~1s~) (Shannon et al. 2016).
+
+This study arose from a technical assistance request from `r (pcode)`, which identified the need to improve understanding of the park's acoustic environment. **!-- Reminder:UPDATE TEXT --!  Soundscape data were identified as a need to document baseline conditions and to help evaluate threats from encroaching development.** Acoustic measurements allow parks to gain insight into levels of extrinsic noise and biological activity. The results can help estimate the effects of noise on park visitors and wildlife, as well as the condition of the acoustic environment.
+
+To carry out this study, `r (sitenumword)` monitoring `r (site_s)` were placed in distinct areas of the monument that captured varied noise levels, sources, and patterns that exist across `r (pcode)`. Results included measures of existing ambient sound levels, calculations of sound source audibility through off-site listening, and estimates of natural ambient sound levels **!-- Reminder:UPDATE TEXT --!  (add additional metrics if needed)**. 
+
+
+At **!-- Reminder:UPDATE TEXT --! `r (pcode)`00X, functional effect thresholds were exceeded at the most sensitive sound threshold, 35 dB (L~Aeq,~~1s~), 33% of the day and 8 %** of the night in the ANS-weighted frequency ranges **!-- Reminder:UPDATE TEXT --! (Table X)**.  These results are like those in the full frequency range, which indicates that most of the sound energy contributing to this threshold is from lower frequency noise sources. Sound levels at this site were measured higher than **!-- Reminder:UPDATE TEXT --! `r (pcode)`00X, and existing median sound levels (L~A50~) were ~5.1** dB higher than natural sound levels (L~Anat~) during the day and **~4.3** dB higher at night **~(Table X)**. Off-site listening in a subset of data revealed that noise was audible nearly **~100 % of each hour, every day (Figure X)**. The primary noise source was coded as **!-- Reminder:UPDATE TEXT --!  "Vehicles", a source that is not surprising given the proximity of this site to suburban infrastructure. The second most common source was coded as "People", which followed activity patterns of a typical human work day (Figure X).** In addition, gunshots were commonly audible from **!-- Reminder:UPDATE TEXT --! 7:00 – 16:00, peaking at 30 – 40 % of each hour from 10:00 – 13:00 (Pennsylvania State University XXXX).  Gunshots audible from this site are from a firing range within 1.5 miles to the northwest. Of the two sites, `r (pcode)`00X had the highest natural sound level. The energetic contributions to natural sound levels at the site were from wind and birds (Pennsylvania State University XXXX).** 
+
+**!-- Reminder:UPDATE TEXT --!  COPY PREVIOUS PARAGRAPH FOR ALL `r (sitenumword)` SITES**
+
+**!-- Reminder:EXAMPLE TEXT --!  Example text if %noise audibility >70% (then delete this!):**~As previously noted, this study reports L~Anat~ despite location specific conditions that partially reduce the accuracy of the sound level calculation. Baseline natural sound levels rely on less frequent noise (target of < 70% audibility) than what exists in `r (pcode)`. Because noise was audible for XX% of the day at `r (pcode)`00X and 77% of the day `r (pcode)`00X, the L~Anat~ reported likely has a higher margin of error than actual baseline conditions. To supplement the measured L~Anat~ results, Appendix `r (gsm)` includes modeled sound levels and suggests that the median modeled whole-park noise impact is X.X dBA greater than the measured noise impact. For long acoustic records with many repeated values (e.g., at the natural ambient sound level) percentiles offer robust estimates of sound level (Tang and Phillips 2016). However, prevalent noise at `r (pcode)` severely censors observations of LAnat and suggests these reported figures overestimate the actual value.**
+
+**!-- Reminder: EXAMPLE TEXT --!  **Based on the results of this study, visitors to `r (pcode)` likely experience noise throughout their visit. In general, noise at all sites is present during daytime and nighttime hours. The location of `r (pcode)` in relation to busy roads, suburban development, and a firing range contributed to the presence of noise at most hours.  
+
+**!-- Reminder: EXAMPLE TEXT --!  :**Finally, in addition to noise, natural sounds from wildlife were audible in the park. Dawn and dusk bird choruses were weak at both sites, and coyotes were the only other common audible animal sound. The lack of animal-derived natural sounds is likely due to monitoring during the winter. Further acoustic analysis, such as artificial intelligence techniques like BirdNET, could generate species lists and daily call patterns from this dataset. In fact, NSNSD worked on another TAR that deployed this technology with acoustic monitoring over multiple seasons and provided unverified bird species information back to `r (pcode)` **UPDATE LINK(https://irma.nps.gov/STAR/Summary/Edit/32069).** 
+
+The information presented in this report will be used to inform park managers and planners, and it will also serve as a permanent record of what the park sounded like in the winter of 2019 - 2020. Sound level data as well as continuous digital audio recordings will be archived with the Natural Sounds and Night Skies Division office in Fort Collins, Colorado. 
+
+:::
+
+:::{custom-style="sr Heading 1"}
+References
+:::
+
+:::{custom-style="sr Literature cited"}
+
+**!-- Reminder:UPDATE LIT --!  ADD Listening Center or SPLAT analysis published to IRMA to Literature cited (then delete this)**
+
+**!-- Reminder: this Literature Cited list contains every standard/reference commonly used across NSNSD reports. Before submitting, delete any entries below that are NOT actually cited somewhere in this specific report's text (e.g. ANSI 1994 and ANSI 2002 are only relevant if this report discusses outdoor SPL measurement standards or classroom acoustics specifically) - a recurring reviewer comment across past reports. --!**
+
+American National Standards Institute (ANSI). 1968. Audiometer Standard 3.6. American National Standards Institute, New York, NY. ANSI/ASA S3.6-2018 (R2023)
+
+American National Standards Institute (ANSI). 1983. Specification for Sound Level Meters 1.4. American National Standards Institute, New York, NY. ASA/ANSI S1.4-1983 (R2006)
+
+American National Standards Institute (ANSI). 1992. Quantities and procedures for description and measurement of environmental sound. Part 2: Measurement of long-term, wide-area sound. Accredited Standards Committee S12, Noise. New York, NY. ANSI/ASA S12.9-1992/Part 2 (R2018)
+
+American National Standards Institute (ANSI). 1994. Outdoor Measurement Of Sound Pressure Level, New York, NY. ANSI/ASA S12.18-1994 (R2009)
+
+American National Standards Institute (ANSI). 2002. Acoustical Performance Criteria, Design Requirements, And Guidelines For Schools. Melville, NY. ANSI/ASA S12.60-2002 (R2021).
+
+American National Standards Institute (ANSI). 2014. Methods to Define and Measure the Residual Sound in Protected Natural and Quiet Residential Areas, Melville, NY. ANSI/ASA S3/SC1.100-2014 (R2020)
+
+Berglund, B., T. Lindvall, and D. H. Schwela (Eds.). 1999. HWO. Guidelines for community noise. World Health Organization, Geneva.
+
+
+Betchkal, D. H., Beeco, J. A., Anderson, S. J., Peterson, B. A., & Joyce, D. 2023. Using aircraft tracking data to estimate the geographic scope of noise impacts from low-level overflights above parks and protected areas. Journal of Environmental Management, 348, 119201.
+
+Betchkal, D.H. and A.W. Hug. 2024. Influence of atmospheric state on variability of long-term sound level measurements in a subalpine valley. In preparation. **!-- Reminder: if this has since been published, update the year/venue/page numbers here and in-text accordingly. --!**
+
+Environmental Protection Agency. 1974. Information on Levels of Noise Requisite to Protect the Public Health and Welfare with an Adequate Margin of Safety.
+
+Environmental Protection Agency. 1982. National Ambient Noise Survey. Office of Noise Abatement and Control, Washington, DC.
+
+Haas, G.E., and T. J. Wakefield. 1998. National parks and the American public: A national public opinion survey on the national park system. Washington D.C. and Fort Collins, CO.: National Parks and Conservation Association and Colorado State University.
+
+Haralabidis Alexandros, S., K. Dimakopoulou, F. Vigna-Taglianti, M. Giampaolo, A. Borgini, M. L. Dudley, G. Pershagen, G. Bluhm, D. Houthuijs, W. Babisch, M. Velonakis, K. Katsouyanni, and L. Jarup. 2008. Acute effects of night-time noise exposure on blood pressure in populations living near airports. European Heart Journal Advance Access. Published online February 12, 2008.
+
+Harris, C. M. 1998. Handbook of Acoustical Measurements and Noise Control, 3rd ed. McGraw-Hill, New York.
+
+McDonald, C. D., R. M. Baumgarten, and R. Iachan. 1995. Aircraft management studies: National Park Service Visitors Survey. HMMH Report No. 290940.12; NPOA Report No. 94-2, National Park Service, U.S. Department of the Interior.
+
+Mennitt, Daniel, et al. 2013. Mapping sound pressure levels on continental scales using a geospatial sound model. Proceedings of Inter-Noise. 1–11.
+
+National Park Service (NPS). 2006. Management Policies 2006. National Park Service, Washington, D.C.
+
+National Park Service. 2013. Acoustic monitoring training manual. Draft, https://www.nps.gov/subjects/sound/upload/NSNSDTrainingManual_AcousticalAmbientMonitoring-508.pdf
+
+National Park Service. 2021. Geospatial Soundscapes Modeling. https://www.nps.gov/media/video/view.htm?id=89BBDB21-E2F0-4625-AD19-920728CF807E 
+
+Pilcher, E. J., Newman, P., & Manning, R. E. 2009. Understanding and managing experiential aspects of soundscapes at Muir Woods National Monument. Environmental Management, 43(3), 425-435.
+
+Poling, J. and D.H. Betchkal. 2023. Use of the noise-free interval (NFI) metric to assess the disturbances of airborne vessel noise at Glacier Bay National Park. In INTER-NOISE and NOISE-CON Congress and Conference Proceedings (Vol. 266, No. 2, pp. 991-1002). Institute of Noise Control Engineering.
+
+Rapoza, A., Sudderth, E., & Lewis, K. 2015. The relationship between aircraft noise exposure and day-use visitor survey responses in backcountry areas of national parks. The Journal of the Acoustical Society of America, 138(4), 2090–2105.
+
+Shannon G, Angeloni LM, Wittemyer G, Fristrup KM, Crooks KR. 2014. Road traffic noise modifies behaviour of a keystone species. Anim Behav. 94:135–141.
+
+Shannon G., M. F. McKenna, L. M. Angeloni, K. R. Crooks, K. M. Fristrup, E. Brown, K. A. Warner, M. D. Nelson, C. White, J. Briggs, S. McFarland, G. Wittemyer. 2016. A synthesis of two decades of research documenting the effects of noise on wildlife. Biological Reviews 91(4), 982–1005.
+
+Templeton, D. (Ed.). 1997. Acoustics in the built environment: advice for the design team. Architectural Press, Oxford
+
+Watts, G., Pearse, J., Delikostidis, I., Kissick, J., Donohue, B., & Dalley, J. (2020). Tranquillity mapping in New Zealand national parks–a pilot study. Noise Mapping, 7(1), 303-315. https://doi.org/10.1515/noise-2020-0025.
+
+Weinzimmer, D., Newman, P., Taff, D., Benfield, J., Lynch, E., & Bell, P. 2014. Human responses to simulated motorized noise in national parks. Leisure Sciences, 36(3), 251–267. 
+
+:::
+
+\newpage
+```{r firstappendix, include=FALSE}
+# --- Appendix header for Site Photos ---
+head1 <- ifelse(append1 == 1, paste("Appendix ",spics,": Site Photos", sep = ""), "")
+
+```
+
+
+:::{custom-style="sr Heading 1"}
+`r (head1)`
+:::
+
+
+
+```{r sitephotos, results='asis',fig.cap=paste("Your caption."), echo=FALSE, include=TRUE, warning=FALSE, message=FALSE, eval=append1a}
+
+fullnames <- as.list(mat$`Site Name`)
+# FIXED: a missing/empty Site Name column in SiteMeta.xlsx was rendering
+# as blank or the literal text "NULL"/"NA" in figure captions (e.g.
+# "Figure 6. NOCA007, NULL.") rather than being handled gracefully.
+if (length(fullnames) == 0) fullnames <- as.list(rep("Site name not provided", length(sitenames)))
+fullnames <- lapply(fullnames, function(x) if (is.null(x) || is.na(x) || x == "") "Site name not provided" else x)
+
+# Loop through each site name to create placeholders for site photos
+for (i in 1:length(sitenames)) {
+    cat("\n\n")
+    styled_block("sr Figure caption", "Figure ", site_fig_list[[i]], ". ", sitenames[[i]], ", ", fullnames[[i]], ".")
+    styled_block("sr Image credit", "NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION")
+    styled_block("sr Alternate text",
+      "Figure ", site_fig_list[[i]], ". ", sitenames[[i]], ", ", fullnames[[i]],
+      ". Standard monitoring equipment utilized for acoustic monitoring in ", park,
+      ". Included within the image are two tripods holding a microphone and weather monitoring instrumentation. Near the two tripods is a solar panel and boxes that hold batteries, a data logger, and an acoustic recording unit. The image is within **!-- Reminder:UPDATE TEXT--! enter habitat here**."
+    )
+    cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
+}
+
+```
+\newpage
+```{r secondappendix, include=FALSE}
+
+# --- Appendix header for GSM ---
+head2 <- ifelse(append2 == 1, paste("Appendix ", gsm," :Modeled Impact Levels", sep=""),"")
+
+```
+
+:::{custom-style="sr Heading 1"}
+`r (head2)`
+:::
+```{r gsm text, include=FALSE}
+
+# --- Geospatial model narrative (conditional on Appendix 2 AND on GSM
+# data actually being available for this park - see gsm_data_available
+# guard added in the "gsm sum" chunk above) ---
+show_gsm_text <- (append2 == 1) && gsm_data_available
+
+gsm_text_para1 <- ifelse(
+  show_gsm_text,
+  paste(
+    "NSNSD developed a model (Mennitt et al. 2014, NPS 2021) that predicts the median sound level using measurements made in hundreds of national park sites as well as 109 explanatory variables such as location, climate, land cover, hydrology, wind speed, and proximity to noise sources such as roads, railroads, and airports. ",
+    "The resulting model can predict sound levels anywhere in the contiguous United States and estimate how much lower these sound levels would be in the absence of human activities. ",
+    "Each pixel in the graphic shown in Figures ", ifelse(show_gsm_text, gsm_exist, ""), "-", ifelse(show_gsm_text, gsm_impact, ""), " represents 270 m and represents the acoustic conditions in a typical summer day.",
+    sep = ""
+  ),
+  ifelse(append2 == 1, "**!-- Reminder: geospatial model data was not found for this park in GSM_CSV - either update the model output files, or set append2 to 'No' and remove this appendix. --!**", "")
+)
+
+gsm_text_para2 <- ifelse(
+  show_gsm_text,
+  paste(
+    "Within ", pcode, ", the model predicted an existing L~50~ of ", gsm_l50_e,
+    " (Figure ", gsm_exist, ") and a natural L~50~ of ", gsm_l50_n,
+    " (Figure ", gsm_natural, "). ",
+    "The modeled difference between the existing and predicted natural sound level (L~50~~impact~) at ", pcode,
+    " is shown in Figure ", gsm_impact, " and provides a measure of how much anthropogenic noise is increasing the existing sound level above the natural sound level on an average summer day in the park. ",
+    "Across ", pcode, " the mean modeled sound level impact is ", gsm_l50_i,
+    " (ranging from ", gsm_l50_i_min, " in the least impacted areas to ", gsm_l50_i_max, " in the most impacted areas).",
+    sep = ""
+  ),
+  ""
+)
+
+gsm_text_para3 <- ifelse(
+  show_gsm_text,
+  paste(
+    "For translating sound level impacts into functional effects (for human visitors and resident wildlife), an increase in background sound level of 3 dB produces an approximate decrease in listening area of 50%. ",
+    "In other words, by raising the sound level at ", pcode, " by just 3 dB, the ability of listeners to hear the sounds around them is effectively cut in half. ",
+    "Furthermore, an increase of 7 dB leads to an approximate decrease in listening area of 80%. ",
+    "An increase of ", gsm_l50_i, " dBA would reduce the listening area for wildlife and visitors by ", gsm_l50_LAR, " %. ",
+    "For example, if a predator can hear a potential prey animal in an area of 100 square feet in a setting with natural ambient sounds, that animal's ability to hear would be reduced to ",
+    gsm_l50_LAR_area, " square feet if the sound levels were increased by the modeled average impact of ", gsm_l50_i, " dBA.",
+    sep = ""
+  ),
+  ""
+)
+                        
+
+```
+
+
+:::{custom-style="sr Normal"}
+
+`r (gsm_text_para1)`
+
+`r (gsm_text_para2)`
+
+`r (gsm_text_para3)`
+
+:::
+
+
+```{r mod_existing, echo=FALSE,out.width = '100%',ft.align="center", eval=append2a && gsm_data_available}
+mod_existing_path <- paste0(park.image.folder, "modeled_l50.png")
+if (file.exists(mod_existing_path)) {
+  include_graphics(mod_existing_path)
+} else {
+  message("modeled_l50.png not found at: ", mod_existing_path, " - figure will be omitted.")
+}
+
+```
+
+```{r gsm_exist_caps, results='asis', echo = FALSE, eval=show_gsm_text}
+
+styled_block("sr Figure caption",
+  "Figure ", gsm_exist, " . Map of predicted existing acoustic levels in ", pcode, " for an average summer day."
+)
+styled_block("sr Image credit", "NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION")
+styled_block("sr Alternate text",
+  "Figure ", gsm_exist, " . Map of predicted existing acoustic levels in ", park,
+  " for an average summer day. The color scale indicates median (L~50~) sound pressure level (in A-weighted decibels, or dBA), with 270-meter resolution. ",
+  "In the map, the park boundary is displayed by a green polygon and fills the entire extent of the main map frame. ",
+  "A dark blue to light blue color gradient follows the range of predicted existing sound levels, from ", gsm_l50_e_min, " dBA to ", gsm_l50_e_max, " dBA. ",
+  "The darkest shade of blue indicates lower existing sound levels and the light blue indicates the highest existing sound levels. ",
+  "The modeled data predicts an L~50~ of ", gsm_l50_e, " dBA for all ", pcode,
+  ", which results in a **!-- Reminder: CONFIRM OR CHANGE COLOR --! darker blue** shade of color displayed."
+)
+
+```
+
+
+```{r mod_natural, echo=FALSE,out.width = '100%',ft.align="center", eval=append2a && gsm_data_available}
+mod_natural_path <- paste0(park.image.folder, "modeled_l50_natural.png")
+if (file.exists(mod_natural_path)) {
+  include_graphics(mod_natural_path)
+} else {
+  message("modeled_l50_natural.png not found at: ", mod_natural_path, " - figure will be omitted.")
+}
+
+```
+
+```{r gsm_natural_caps, results='asis', echo = FALSE, eval=show_gsm_text}
+
+styled_block("sr Figure caption",
+  "Figure ", gsm_natural, " . Map of predicted natural acoustic levels in ", pcode, " for an average summer day."
+)
+styled_block("sr Image credit", "NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION")
+styled_block("sr Alternate text",
+  "Figure ", gsm_natural, " . Map of predicted natural acoustic levels in ", park,
+  " for an average summer day. The color scale indicates median (L~50~) sound pressure level (in A-weighted decibels, or dBA), with 270-meter resolution. ",
+  "In the map, the park boundary is displayed by a green polygon and fills the entire extent of the main map frame. ",
+  "A dark brown to dark blue color gradient follows the range of predicted natural sound levels, from ", gsm_l50_n_min, " dBA to ", gsm_l50_n_max, " dBA. ",
+  "The darkest shade of brown indicates lower natural sound levels and the dark blue indicates the highest natural sound levels. ",
+  "The modeled data predicts an L~50~ of ", gsm_l50_n, " dBA for all ", pcode,
+  ", which results in a **!-- Reminder: CONFIRM OR CHANGE COLOR --! darker brown** shade of color displayed."
+)
+
+```
+
+
+```{r mod_impact, echo=FALSE,out.width = '100%',ft.align="center", eval=append2a && gsm_data_available}
+mod_impact_path <- paste0(park.image.folder, "modeled_l50_impact.png")
+if (file.exists(mod_impact_path)) {
+  include_graphics(mod_impact_path)
+} else {
+  message("modeled_l50_impact.png not found at: ", mod_impact_path, " - figure will be omitted.")
+}
+
+```
+
+```{r gsm_impact_caps, results='asis', echo = FALSE, eval=show_gsm_text}
+
+styled_block("sr Figure caption",
+  "Figure ", gsm_impact, " . Map of predicted impact levels in ", pcode, " for an average summer day."
+)
+styled_block("sr Image credit", "NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION")
+styled_block("sr Alternate text",
+  "Figure ", gsm_impact, " . Map of predicted acoustic impact levels in ", park,
+  " for an average summer day. The color scale indicates how much man-made noise increases the sound level (in A-weighted decibels, or dBA), with 270-meter resolution. ",
+  "Black or dark blue colors indicate low impacts while yellow or white colors indicate greater impacts. ",
+  "The park boundary is displayed by a green polygon, while pixels inside the park boundary are mostly **!-- Reminder: CONFIRM OR CHANGE COLOR --! light blue.** ",
+  "The mean acoustic impact level at the park is ", gsm_l50_i,
+  " ranging from ", gsm_l50_i_min, " dBA to ", gsm_l50_i_max, " dBA."
+)
+
+```
+
+\newpage
+```{r thirdappendix, include=FALSE}
+
+# --- Appendix header and descriptive text for detailed sound source descriptions ---
+head3 <- ifelse(
+  append3 == 1,
+  paste("Appendix ", lcdet, ": Detailed Sound Source Descriptions", sep = ""),
+  ""
+)
+
+text3a <- ifelse(
+  append3 == 1 && exists("det_pa_start"),
+  paste("Sound source description results are displayed in Figures ", det_pa_start, "–", det_pa_end, ".", sep = ""),
+  ""
+)
+
+```
+:::{custom-style="sr Heading 1"}
+`r (head3)`
+:::
+
+:::{custom-style="sr Normal"}
+`r (text3a)`
+:::
+
+\newpage
+
+
+```{r detailedPA, results='asis', echo=FALSE, include=TRUE, warning=FALSE, message=FALSE, eval=append3a}
+# Scan `dirs` (folder-scope-filtered) instead of report_dir, keeping the
+# file list in sync with det_pa_fig_list's numbering (from run_logic(),
+# which also receives the filtered `dirs`). Then explicitly re-sorted by
+# order number - see order_by_folder_num() note in the "table numbering"
+# chunk re: recursive multi-path list.files() not reliably preserving
+# folder order.
+detpapngfiles <- list.files(path = dirs, pattern = "PercentAud_description_all", full.names = TRUE, recursive = TRUE)
+detpapngfiles <- order_by_folder_num(detpapngfiles)
+
+imagename <- basename(detpapngfiles)
+figsites <- sub("_.*", "", imagename)
+figseasons <- tolower(sub("^[^_]*_([^_]*)_.*$", "\\1", imagename))
+figyears<- sub(".*_(\\d{4})/.*$", "\\1", detpapngfiles)
+
+for (i in seq_along(detpapngfiles)) {
+  f <- detpapngfiles[i]
+
+  cat(paste0("![](", f, ")\n"))
+
+  styled_block("sr Figure caption",
+    "Figure ", det_pa_fig_list[[i]], ". Comprehensive sound source description results from off-site listening at ",
+    figsites[i], " in ", figseasons[i], ", ", figyears[i], "."
+  )
+
+  styled_block("sr Image credit", "NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION")
+
+  styled_block("sr Alternate text",
+    "Figure ", det_pa_fig_list[[i]], ". The comprehensive sound source description results from off-site listening at ",
+    figsites[i], " in ", figseasons[i], ", ", figyears[i],
+    " are presented in a horizontal bar chart. The chart is divided into two panes: the left panel displays all identified noise sources, while the right panel features all identified natural sources. Sound source categories are listed on the Y-axis, with the percent time audible represented on the X-axis. Each category has bars extending from left to right, sorted in descending order. Noise sources on the left are indicated by green bars, while natural sources are represented by orange bars. **!-- Reminder:UPDATE TEXT--! Describe which source was most audible in each category at this site.**"
+  )
+
+  cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
+}
+
+```
+
+\newpage
+```{r fourthappendix, include=FALSE}
+
+# --- Appendix header and descriptive text for Trend Graphs (NEW) ---
+# Gated on both the append4 parameter AND show_trends (computed in the
+# "table numbering" chunk above - TRUE only if a trends/ folder exists
+# under this park's REPORTS directory AND it contains at least one PNG
+# matching a season currently in scope under folder_scope/order_list).
+head4 <- ifelse(append4 == 1, paste("Appendix ", trend_append, ": Acoustic Trend Graphs", sep = ""), "")
+
+text4a <- ifelse(
+  show_trends,
+  paste("Trend graphs comparing sound levels and noise metrics across multiple years of monitoring are shown in Figures ",
+        trend_fig_start, "–", trend_fig_end, ".", sep = ""),
+  ifelse(append4 == 1, "**!-- Reminder: no trend graphs were found for this park under REPORTS/<pcode>/trends for the currently selected folder(s) - either run Step 1's trend-building step for at least 2 season/year combos, or set append4 to 'No' and remove this appendix. --!**", "")
+)
+
+```
+:::{custom-style="sr Heading 1"}
+`r (head4)`
+:::
+
+:::{custom-style="sr Normal"}
+`r (text4a)`
+:::
+
+\newpage
+
+```{r trend_figs, results='asis', echo=FALSE, eval=show_trends, warning=FALSE, message=FALSE}
+
+# Renders every trend PNG Step1 produced under REPORTS/<pcode>/trends/
+# (already filtered to seasons in scope - see trendpngfiles in the
+# "table numbering" chunk). Filenames follow Step1's
+# "<site>_trend_<MetricName>.png" pattern (with safe_name() applied to
+# both site and metric, replacing non-alphanumeric characters with "_"),
+# so the split below is a best-effort parse of that pattern rather than
+# a guaranteed-clean label - review the "Describe the trend" reminder
+# text on each figure and adjust the auto-generated metric label if it
+# reads awkwardly (e.g. multi-word metrics like "EventCount_TopSources"
+# will show up as "EventCount TopSources").
+imagename <- basename(trendpngfiles)
+# trend_season is only ever used mid-sentence below - lowercased at
+# extraction, matching figseasons/season_here elsewhere in this report.
+trend_season <- tolower(basename(dirname(trendpngfiles)))
+trend_site <- sub("_trend_.*$", "", imagename)
+trend_metric <- sub("^.*_trend_", "", imagename)
+trend_metric <- sub("\\.png$", "", trend_metric)
+trend_metric_label <- gsub("_", " ", trend_metric)
+
+for (i in seq_along(trendpngfiles)) {
+  f <- trendpngfiles[i]
+  cat(paste0("![](", f, ")\n"))
+
+  styled_block("sr Figure caption",
+    "Figure ", trend_fig_list[[i]], ". ", trend_metric_label[i], " trend across years at ",
+    trend_site[i], " (", trend_season[i], ")."
+  )
+
+  styled_block("sr Image credit", "NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION")
+
+  styled_block("sr Alternate text",
+    "Figure ", trend_fig_list[[i]], ". A line chart depicts ", trend_metric_label[i],
+    " on the y-axis and year on the x-axis at ", trend_site[i], " during the ", trend_season[i],
+    " season, showing how this metric has changed across the years monitored. **!-- Reminder:UPDATE TEXT --! Describe the direction and magnitude of any trend shown (e.g. increasing/decreasing noise impact, stable ambient levels, etc).**"
+  )
+
+  cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
+}
+```
