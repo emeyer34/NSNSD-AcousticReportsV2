@@ -1,6 +1,6 @@
 #########################################################################
 #
-#  Step3_AcousticSiteMap.R
+#  Step2_AcousticSiteMap.R
 #
 #  Standalone script: builds an NPS-style acoustic monitoring site map.
 #

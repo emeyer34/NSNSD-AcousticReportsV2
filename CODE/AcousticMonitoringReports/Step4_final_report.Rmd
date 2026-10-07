@@ -742,8 +742,8 @@ for (i in 1:length(datafolders)) {
   # Rename key columns for clarity
   colnames(data)[1] <- "Site Name"
   colnames(data)[6] <- "LA50Day"
-  colnames(data)[7] <- "LA50Night"
-  colnames(data)[8] <- "LANATDay"
+  colnames(data)[8] <- "LA50Night"
+  colnames(data)[7] <- "LANATDay"
   colnames(data)[9] <- "LANATNight"
   
   # Add source metadata
@@ -1263,8 +1263,8 @@ for (g in seq_along(exec_table_groups)) {
     names(d) <- gsub("\\.", " ", names(d))
     colnames(d)[1] <- "Site Name"
     colnames(d)[6] <- " Day"    # leading space for alignment
-    colnames(d)[7] <- " Night"  # leading space for alignment
-    colnames(d)[8] <- "Day "
+    colnames(d)[8] <- " Night"  # leading space for alignment
+    colnames(d)[7] <- "Day "
     colnames(d)[9] <- "Night "
     if (combine_tables_by_season) d$Year <- years[[i]]
     d
@@ -2324,7 +2324,7 @@ Berglund, B., T. Lindvall, and D. H. Schwela (Eds.). 1999. HWO. Guidelines for c
 
 Betchkal, D. H., Beeco, J. A., Anderson, S. J., Peterson, B. A., & Joyce, D. 2023. Using aircraft tracking data to estimate the geographic scope of noise impacts from low-level overflights above parks and protected areas. Journal of Environmental Management, 348, 119201.
 
-Betchkal, D.H. and A.W. Hug. 2024. Influence of atmospheric state on variability of long-term sound level measurements in a subalpine valley. In preparation. **!-- Reminder: if this has since been published, update the year/venue/page numbers here and in-text accordingly. --!**
+Betchkal, D. H., & Hug, A. W. 2024. Influence of atmospheric state on variability of long-term residual ambient sound level measurements in a subalpine valley. The Journal of the Acoustical Society of America, 156(4), 2877-2888.
 
 Environmental Protection Agency. 1974. Information on Levels of Noise Requisite to Protect the Public Health and Welfare with an Adequate Margin of Safety.
 

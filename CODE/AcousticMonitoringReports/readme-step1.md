@@ -11,9 +11,10 @@ Takes raw `METRICS_*.txt` files (produced by the Acoustic Monitoring Toolbox for
 2. Fixes a known formatting bug in some metrics files (a missing tab before the `Lnat` column)
 3. Detects which season(s), and which analysis types (Listening Center and/or SPLAT), each file contains
 4. Maintains a persistent Season/Year → Order Number lookup per park, so report folders and figure/table numbering stay consistent across repeated runs. Order Number represents the sequence of deployment.
-5. Exports one folder of CSVs and PNGs per Season+Year combination into `REPORTS/<PARK_CODE>/<order>_<Season>_<Year>/`
+5. Exports one folder of CSVs and PNGs per Season+Year combination into `REPORTS/<PARK_CODE>/<order>_<Season>_<Year>/`, with hourly and frequency-content plot y-axes auto-scaled to each site's own data by default
 6. Builds/updates a per-park `SiteMeta.xlsx` (site IDs, monitoring date ranges, and optionally auto-filled Latitude/Longitude)
-7. Once 2+ Season+Year combinations exist for a park, builds multi-year trend graphs (trend graphs need review and are primarily for data exploration at this point)
+7. Builds a "quick-review" PDF for each Season+Year folder — a captioned, client-ready preview of every table and figure produced for that folder, led by the SiteMeta table
+8. Once 2+ Season+Year combinations exist for a park, builds multi-year trend graphs (trend graphs need review and are primarily for data exploration at this point)
 
 This script is the foundation of the whole pipeline — Steps 2, 3, and 4 all read the folder structure and files it produces.
 
@@ -30,9 +31,9 @@ This script is the foundation of the whole pipeline — Steps 2, 3, and 4 all re
 ```
 reshape2, ggplot2, ggthemes, plyr, lubridate, tidyverse, data.table, readr,
 sjmisc, janitor, dplyr, scales, english, rlist, jsonlite, tcltk, openxlsx,
-rvest, httr, xml2
+rvest, httr, xml2, png, gridExtra
 ```
-Installed/loaded automatically on first run if missing. `rstudioapi` is used opportunistically (for cleaner file/folder dialogs) but isn't a hard requirement — the script falls back to `tcltk`/base R dialogs.
+Installed/loaded automatically on first run if missing. `rstudioapi` is used opportunistically (for cleaner file/folder dialogs) but isn't a hard requirement — the script falls back to `tcltk`/base R dialogs. `png` and `gridExtra` are used only by the quick-review PDF feature (image rendering and table layout, respectively).
 
 ## Running it
 
@@ -47,7 +48,7 @@ Open the script in RStudio and run the whole thing (Source), or select it in chu
 7. **If** `use_deployment_locations_lookup` is enabled (default): a Deployment Locations export file, to auto-fill Latitude/Longitude
 8. `SiteMeta.xlsx` opens for you to review/fill in remaining fields (Site Name, Vegetation, Wilderness, Elevation, and Latitude/Longitude if not auto-filled) — save and close, then return to R and press Enter
 
-After that, it runs unattended: one pass per Season+Year combination, writing all outputs, then (if applicable) building trend graphs.
+After that, it runs unattended: one pass per Season+Year combination, writing all outputs and (if enabled) that folder's quick-review PDF, then (if applicable) building trend graphs.
 
 ## Handling files with the same name (multi-file-per-season exports)
 
@@ -66,7 +67,9 @@ All configuration is at the top of the script (Section 0):
 |---|---|---|
 | `plottitle` | `TRUE` | Include titles on generated plots |
 | `plotHRDBA` / `plotTRUNCDBA` / `plotFREQDBA` / `plotCONTOUR` | `TRUE` | Which base-graphics plot types to generate |
-| `yMaxHr`/`yMinHr`/`yMaxHz`/`yMinHz` | various | Y-axis limits for hourly/frequency plots |
+| `plotAUTO_Y` | `TRUE` | Auto-scale the y-axis of hourly (DBAvHR/DBTvHR) and frequency-content (SPLvFREQ) plots to each site/season's own data, instead of using fixed limits for every site. Recommended when comparing sites/parks with very different sound levels, since one fixed range can't comfortably fit both a quiet and a loud site. Set to `FALSE` to fall back to the fixed `yMaxHr`/`yMinHr`/`yMaxHz`/`yMinHz` limits below for every plot. |
+| `autoscale_pad_frac` | `0.15` | Only used when `plotAUTO_Y` is `TRUE`. Padding added above/below each plot's actual data range, as a fraction of that range (minimum 1.5 dB), before rounding outward to the nearest multiple of 3. Increase for more breathing room around the data, decrease to crop tighter to it. |
+| `yMaxHr`/`yMinHr`/`yMaxHz`/`yMinHz` | various | Fixed y-axis limits for hourly/frequency plots — only used when `plotAUTO_Y` is `FALSE` |
 | `tabfix_scope` | `"day_night"` | Scope of the missing-tab-before-Lnat fix — `"any"` or `"day_night"` (only Day/Night rows) |
 | `copy_common_images` | `TRUE` | Copy shared reference PNGs from `MAPS_IMAGES/COMMON/` into each park's `SitesMeta` folder |
 | `build_sitemeta` | `TRUE` | Build/update `SiteMeta.xlsx` from NVSPL deployment folders |
@@ -76,6 +79,10 @@ All configuration is at the top of the script (Section 0):
 | `build_trends` | `TRUE` | Build multi-year trend graphs once enough data exists |
 | `trend_min_combos` | `2` | Minimum Season+Year combinations required before trends are built |
 | `trend_top_n_sources` | `5` | For event-count/length trends, how many top noise sources to plot |
+| `build_quick_pdf` | `TRUE` | Build a captioned "quick-review" PDF for each Season+Year folder once its CSVs/PNGs are written |
+| `quick_pdf_width` / `quick_pdf_height` | `11` / `8.5` | Page size (inches) for the quick-review PDF — defaults to landscape US Letter |
+| `quick_pdf_table_fontsize` | `7` | Base font size for table pages in the quick-review PDF |
+| `quick_pdf_max_rows_per_page` | `25` | Tables longer than this are split across multiple pages, each labeled with its row range, so nothing is silently cut off |
 
 ## What gets produced
 
@@ -88,6 +95,7 @@ Per Season+Year folder (`REPORTS/<PARK_CODE>/<order>_<Season>_<Year>/`):
 - `analysisdays_<season>.csv` — number of days analyzed by Listening Center / SPLAT, extracted directly from each metrics file's own header line (used by Step 4's Methods section text)
 - Per-site PNGs: frequency content, hourly percentile levels, contour plots, top-1/top-2 noise source bar charts, all-source detail/category bar charts
 - If SPLAT data present: per-site event counts/lengths CSVs, noise-free interval CSVs, and noise-free interval time series PNGs (showing median and mean NFI by hour)
+- **If `build_quick_pdf` is enabled:** `<PARK_CODE>_<order>_<Season>_<Year>.pdf` — a single PDF leading with the SiteMeta table, then every CSV in the folder rendered as a numbered, captioned table and every PNG as a numbered, captioned figure. Captions are adapted from the Step 3 snapshot report's own table/figure language, so this reads like a lightweight preview of that report rather than a bare file listing. Intended as a quick, no-text-review-needed deliverable you can hand to a client between getting raw data back and producing a full Step 3 or Step 4 report.
 
 Once 2+ Season+Year combos exist: `REPORTS/<PARK_CODE>/trends/<Season>/<site>_trend_<Metric>.png` for ambient levels, time-above thresholds, impact/listening area reduction, noise-free interval, and top-source event counts/lengths.
 
@@ -99,4 +107,6 @@ Also updates: `REPORTS/<PARK_CODE>/<PARK_CODE>_season_order_lookup.csv` and `REP
 - The noise-free interval plots show **median (50th percentile) and mean only** — earlier versions also plotted 90th/10th percentile lines; this was intentionally simplified.
 - `readMetrics.r`'s `$n` (sample count) field returns `NA` for `LLDetail`/`LLCat` metric types, since its extraction regex expects an `"hr"` suffix that those sections' headers don't have (they use `"days"` instead). This is currently harmless — that field isn't used downstream in this script — but is worth knowing if you build something new against `readMetrics()` that relies on it for those two types.
 - `sec_to_mmss()` (used for the noise-free interval plot's y-axis) is defined independently in this script and again in `Step4_final_report.Rmd`. They aren't shared code, just the same small conversion needed in two places — a fix to one won't propagate to the other.
-
+- **Auto-scaled y-axes (`plotAUTO_Y`) mean the same metric can appear on a different axis range from one plot to the next** — this is the point (it keeps a quiet site from being crushed into a few pixels by a loud site's range), but it also means you can no longer visually compare two plots' steepness/magnitude at a glance just by eyeballing their shapes side by side if their axis ranges differ. Set `plotAUTO_Y <- FALSE` if you need a consistent axis across a specific set of sites for direct visual comparison.
+- **The quick-review PDF is the least-verified feature in this script** — its page layout relies on `grid` viewport math (for scaling tables/images to fit the page and reserving space for wrapped captions) that hasn't been exhaustively tested against every possible table shape or caption length. Build one quick-review PDF and look through it before relying on it for an actual client deliverable. In particular, check that very long captions haven't crowded the table/figure below them, and that very wide tables haven't been scaled down to the point of being hard to read.
+- The quick-review PDF's SiteMeta table is pulled from the park's shared `SiteMeta.xlsx` (not something computed per folder), so it will be **identical across every Season+Year folder's PDF for a given park** — this is intentional, so each PDF is self-contained, but means updates to `SiteMeta.xlsx` (e.g. filling in Latitude/Longitude later) won't retroactively update PDFs already built before that edit; rerun the folder(s) you want refreshed.

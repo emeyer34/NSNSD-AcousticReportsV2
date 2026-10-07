@@ -1,6 +1,6 @@
 #########################################################################
 #
-#  Step1_AcousticReport_ParseExport.R
+#  Step2_AcousticReport_ParseExport.R
 #
 #  Purpose:
 #    Replaces Step2_AcousticReport_HTML_DataExplore.Rmd. No HTML report is
@@ -19,11 +19,11 @@
 #      8) Builds a SitesMeta folder per park with common reference images
 #         and a SiteMeta.xlsx (site IDs + monitoring date ranges), which
 #         it will open for you to fill in Latitude/Longitude by hand.
-#      9) Builds a "quick-review" PDF per Season+Year folder, leading with
-#         the SiteMeta table and then rendering every CSV as a captioned
-#         table and every PNG as a captioned figure - a lightweight,
-#         no-text-review-needed deliverable you can hand to a client
-#         between raw data and a full Step3/Step4 report.
+#      9) Builds a "quick-review" PDF per Season+Year folder, rendering
+#         every CSV as a captioned table and every PNG as a captioned
+#         figure - a lightweight, no-text-review-needed deliverable you
+#         can hand to a client between raw data and a full Step3/Step4
+#         report.
 #
 #  NOTE: Site-map generation (park boundary + site locations, styled like
 #  the NPS acoustic monitoring templates) has been pulled out of this
@@ -69,7 +69,7 @@ plotAUTO_Y <- TRUE
 ## A minimum of 1.5 dB of padding is always applied even for very flat/
 ## narrow-range data, so a nearly-flat line never ends up plotted right at
 ## the plot's own edge.
-autoscale_pad_frac <- 0.25
+autoscale_pad_frac <- 0.08
 
 ## Computes an auto-scaled [ymin, ymax] from a plot's actual data range,
 ## already rounded outward to the nearest multiple of 3 (so it drops in
@@ -131,13 +131,13 @@ trend_top_n_sources <- 5      # for EventCountsLengths trends, how many top nois
 
 ## -- Quick-review PDF ------------------------------------------------------
 ## Builds a single PDF per <order>_<season>_<year> folder, right after
-## everything else for that folder has been written, containing the
-## SiteMeta table, then every CSV (as a captioned table) and every PNG
-## (as a captioned figure) found in that folder. Intended as a
-## lightweight, no-text-review-needed intermediary deliverable - something
-## you can hand to a client between getting raw data back and producing a
-## full Step3 (snapshot) or Step4 (final) report. Saved as
-## <pcode>_<order>_<season>_<year>.pdf directly inside that same folder.
+## everything else for that folder has been written, containing every CSV
+## (as a captioned table) and every PNG (as a captioned figure) found in
+## that folder. Intended as a lightweight, no-text-review-needed
+## intermediary deliverable - something you can hand to a client between
+## getting raw data back and producing a full Step3 (snapshot) or Step4
+## (final) report. Saved as <pcode>_<order>_<season>_<year>.pdf directly
+## inside that same folder.
 build_quick_pdf <- TRUE
 quick_pdf_width  <- 11    # inches (landscape US Letter)
 quick_pdf_height <- 8.5   # inches
@@ -290,14 +290,11 @@ open_file_default_app <- function(path) {
   })
 }
 
-## Extracts the "(n = X days)" (or "(n = X day)") count from a specific
-## section header line for a given label + season, e.g. the line
-## "Listening Center Detailed Event Audibility (%), Summer (n = 9 days)"
-## or "SPLAT Detailed Average Event Counts, Summer (n = 8 days)" in a
-## metrics file. Used below to build the "N" / "N-M" analysis-period
-## text automatically included in Step4's Methods section narrative,
-## instead of a manual placeholder someone had to read out of the files
-## by hand and update for every report.
+## Extracts the leading "<order>_" number from a folder or file path and
+## returns paths sorted by that number ascending. Used to guarantee
+## every folder-derived list in this report (tables AND figures) is
+## processed in true chronological/order-number sequence, regardless of
+## how the underlying file scan happened to return them.
 extract_days_count <- function(fileName, label, season) {
   fileData <- scan(fileName, what = "character", sep = "\n", blank.lines.skip = FALSE, quiet = TRUE)
   search_str <- paste0(label, ", ", season)
@@ -316,183 +313,48 @@ extract_days_count <- function(fileName, label, season) {
 ## R graphics device in the environment this script was authored in.
 ## Please build a quick-review PDF for one small folder first and check
 ## it visually before relying on this for a real client deliverable.
-##
-## Captions below borrow language directly from the Step3 snapshot report
-## template, so the quick-review PDF reads like a lightweight preview of
-## that report's tables/figures rather than a bare list of filenames.
-## They're deliberately more detailed than a one-line label - see the
-## caption-wrapping note below for how that's handled on the page.
 
-## Best-effort, pattern-matched, Step3-style caption for a CSV this
-## script produces, based on its filename plus the park/season/year
-## context for the folder being built. Falls back to a prettified
+## Best-effort, pattern-matched human-readable caption for a CSV this
+## script produces, based on its filename. Falls back to a prettified
 ## version of the raw filename for anything unmatched (e.g. a file type
 ## added later that this lookup hasn't been updated for).
-get_csv_caption <- function(filename, pcode, parkname, season, year) {
+get_csv_caption <- function(filename) {
   fn <- basename(filename)
-  if (grepl("^ambfullsum_", fn))
-    return(sprintf(
-      "Summary of sound levels at %s (%s) in %s, %s. For each site, includes the 90th percentile (LA10), existing (LA50), natural (LAnat), and 10th percentile (LA90) ambient sound levels (dB re 20 uPa, A-weighted broadband, 12.5-20,000 Hz) during the day (0700-1900) and night (1900-0700).",
-      parkname, pcode, season, year))
-  if (grepl("^executivesumtab_", fn))
-    return(sprintf(
-      "Executive summary for %s (%s), %s %s: mean overall noise audibility, top contributing noise sources, and ambient sound levels (LA50/LAnat, day and night) by site.",
-      parkname, pcode, season, year))
-  if (grepl("^impactlisteningarea_", fn))
-    return(sprintf(
-      "Noise impact (dB, existing minus natural ambient) and Listening Area Reduction (%%) by site at %s (%s), %s %s, for day, night, and the combined 24-hour period.",
-      parkname, pcode, season, year))
-  if (grepl("^timeabove_", fn))
-    return(sprintf(
-      "Percent time above sound level thresholds for acoustic records collected at %s (%s) in %s, %s. Values show the percent of time ANS-weighted sound levels (20-1,250 Hz) and the full measured frequency range (12.5-20,000 Hz) exceeded 35, 45, 52, and 60 dB (LAeq,1s), by site and day/night.",
-      parkname, pcode, season, year))
-  if (grepl("^analysisdays_", fn))
-    return(sprintf(
-      "Number of days of audio analyzed for the Listening Center and SPLAT detection methods at %s (%s) in %s, %s - the basis for the analysis-period text reported in the Methods section.",
-      parkname, pcode, season, year))
-  if (grepl("^ListeningCenter_.*_DetailedResults_", fn))
-    return(sprintf(
-      "Listening Center: percent of time each individual sound source was judged audible by a trained listener, by hour of day, in %s %s.",
-      season, year))
-  if (grepl("^SPLAT_.*DetailedResults_", fn))
-    return(sprintf(
-      "SPLAT (automated detection): percent of time each individual sound source was detected, by hour of day, in %s %s.",
-      season, year))
-  if (grepl("_EventCountsLengths_", fn))
-    return(sprintf(
-      "SPLAT: mean number of detected events and mean event length (seconds) for each sound source, by day, night, and the combined 24-hour period, in %s %s.",
-      season, year))
-  if (grepl("_NoiseFreeInterval_", fn))
-    return(sprintf(
-      "SPLAT: duration of noise-free intervals (seconds) between detected events, at the 90th/50th/10th percentile and mean, by hour of day, in %s %s.",
-      season, year))
+  if (grepl("^ambfullsum_", fn)) return("Percentile sound levels (L10, L50, Lnat, L90) by site, day/night")
+  if (grepl("^executivesumtab_", fn)) return("Executive summary: noise audibility and ambient sound levels by site")
+  if (grepl("^impactlisteningarea_", fn)) return("Noise impact (dB) and Listening Area Reduction (%) by site")
+  if (grepl("^timeabove_", fn)) return("Percent time above sound level thresholds (35/45/52/60 dB) by site")
+  if (grepl("^analysisdays_", fn)) return("Number of days analyzed (Listening Center / SPLAT)")
+  if (grepl("^ListeningCenter_.*_DetailedResults_", fn)) return("Listening Center: hourly audibility by individual sound source")
+  if (grepl("^SPLAT_.*DetailedResults_", fn)) return("SPLAT: hourly audibility by individual sound source")
+  if (grepl("_EventCountsLengths_", fn)) return("SPLAT: mean event counts and lengths by sound source")
+  if (grepl("_NoiseFreeInterval_", fn)) return("SPLAT: noise-free interval duration by hour (90th/50th/10th percentile, mean)")
   paste0("Data table: ", gsub("[_.]+", " ", tools::file_path_sans_ext(fn)))
 }
 
-## Same idea as get_csv_caption(), for PNG figures. Site ID is pulled
-## directly from the filename - every PNG this script writes is named
-## starting with "<siteID>_<season>_...", and site IDs never contain an
-## underscore (same assumption the rest of this script already makes
-## when parsing site IDs out of METRICS filenames), so splitting on the
-## first underscore reliably recovers it.
-get_png_caption <- function(filename, pcode, parkname, season, year) {
+## Same idea as get_csv_caption(), for PNG figures.
+get_png_caption <- function(filename) {
   fn <- basename(filename)
-  site <- sub("_.*", "", fn)
-  if (grepl("PercentAud_description_all", fn))
-    return(sprintf("%s: percent of time each individual sound source was audible, grouped by category (noise/natural), in %s %s.", site, season, year))
-  if (grepl("PercentAud_category_all", fn))
-    return(sprintf("%s: percent of time audible by sound source category (noise/natural), in %s %s.", site, season, year))
-  if (grepl("PercentAud_top1", fn))
-    return(sprintf("%s: hourly percent time audible for total human-caused sound compared to the single top noise source, in %s %s.", site, season, year))
-  if (grepl("PercentAud_top2", fn))
-    return(sprintf("%s: hourly percent time audible for total human-caused sound compared to the top two noise sources, in %s %s.", site, season, year))
-  if (grepl("_SPLvFREQ", fn))
-    return(sprintf(
-      "Day and night percentile sound pressure levels for 33 one-third octave bands at %s in %s, %s. The bold portion of each bar indicates the range between existing (L50) and natural (Lnat) sound pressure levels; grayed areas fall outside the typical range of human hearing.",
-      site, season, year))
-  if (grepl("_DBAvHR", fn))
-    return(sprintf(
-      "Hourly percentile sound levels (LAeq,1s, dB re 20 uPa) at %s in %s, %s, showing LA10, LA50, LA90 and (when available) LAnat for each hour of the day.",
-      site, season, year))
-  if (grepl("_DBTvHR", fn))
-    return(sprintf("Hourly percentile sound levels, ANS-weighted (20-1,250 Hz), at %s in %s, %s.", site, season, year))
-  if (grepl("_NFI_timeseries", fn))
-    return(sprintf("%s: median and mean duration of noise-free intervals by hour of day, in %s %s.", site, season, year))
-  if (grepl("_CONTOUR", fn))
-    return(sprintf("%s: sound level contour plot (hour of day vs. frequency, colored by sound pressure level in dB), %s %s.", site, season, year))
+  if (grepl("PercentAud_description_all", fn)) return("All sound sources: percent time audible, by category")
+  if (grepl("PercentAud_category_all", fn)) return("Sound source categories: percent time audible")
+  if (grepl("PercentAud_top1", fn)) return("Top noise source: hourly percent time audible")
+  if (grepl("PercentAud_top2", fn)) return("Top two noise sources: hourly percent time audible")
+  if (grepl("_SPLvFREQ", fn)) return("Frequency content: percentile sound levels by one-third octave band")
+  if (grepl("_DBAvHR", fn)) return("Hourly percentile sound levels (L10/L50/Lnat/L90)")
+  if (grepl("_DBTvHR", fn)) return("Hourly percentile sound levels, ANS-weighted (20-1250 Hz)")
+  if (grepl("_NFI_timeseries", fn)) return("Noise-free interval by hour (median and mean)")
+  if (grepl("_CONTOUR", fn)) return("Sound level contour plot: hour vs. frequency")
   paste0("Figure: ", gsub("[_.]+", " ", tools::file_path_sans_ext(fn)))
 }
 
-## Wraps a caption to a conservative character width before it's drawn,
-## and reports how many lines it wrapped to so the caller can reserve
-## enough vertical space for it. There's no actual text-measurement call
-## here (grid doesn't expose font metrics cheaply before drawing) - this
-## uses a fixed, deliberately conservative characters-per-inch estimate
-## for 12pt bold text, erring toward MORE line breaks (using more
-## vertical space) rather than risking text running off the page edge.
-## If captions wrap more tightly than necessary, or - more importantly -
-## run off the right edge of the page, adjust chars_per_inch below
-## (lower = more conservative/more wrapping).
-wrap_caption <- function(caption, dev_width, margin_in = 0.4, chars_per_inch = 9) {
-  avail_w_in <- dev_width - 2 * margin_in
-  wrap_width <- max(20, floor(avail_w_in * chars_per_inch))
-  wrapped <- strwrap(caption, width = wrap_width)
-  if (length(wrapped) == 0) wrapped <- ""
-  list(text = paste(wrapped, collapse = "\n"), n_lines = length(wrapped))
-}
-
-## Renders one already-loaded data.frame as one or more captioned table
-## pages (split into chunks of quick_pdf_max_rows_per_page rows if the
-## table is longer than that, with "(continued, rows X-Y)" appended to
-## the caption for chunks after the first, so a long table is never
-## silently cut off). Numeric columns are rounded for display - Latitude/
-## Longitude keep 5 decimal places (coordinate precision matters),
-## everything else is rounded to 1 decimal. Column names have dots/
-## underscores replaced with spaces. The table grob is scaled down
-## (preserving its own proportions - never stretched/squished) to fit
-## within the page if it would otherwise overflow. Shared by
-## add_pdf_table_page() (CSVs) and the SiteMeta.xlsx table below.
-add_pdf_table_page_df <- function(d, caption, dev_width, dev_height,
-                                  margin_in = 0.4, table_fontsize = quick_pdf_table_fontsize,
-                                  max_rows_per_page = quick_pdf_max_rows_per_page) {
-  if (is.null(d) || nrow(d) == 0) {
-    message("  Skipping empty table in quick-review PDF: ", caption)
-    return(invisible(NULL))
-  }
-  
-  for (cn in names(d)) {
-    if (is.numeric(d[[cn]])) {
-      d[[cn]] <- round(d[[cn]], if (cn %in% c("Latitude", "Longitude")) 5 else 1)
-    }
-  }
-  names(d) <- gsub("[._]", " ", names(d))
-  
-  n_chunks <- ceiling(nrow(d) / max_rows_per_page)
-  for (chunk_i in seq_len(n_chunks)) {
-    row_start <- (chunk_i - 1) * max_rows_per_page + 1
-    row_end <- min(chunk_i * max_rows_per_page, nrow(d))
-    d_chunk <- d[row_start:row_end, , drop = FALSE]
-    
-    this_caption <- if (chunk_i > 1) {
-      paste0(caption, " (continued, rows ", row_start, "-", row_end, ")")
-    } else if (n_chunks > 1) {
-      paste0(caption, " (rows ", row_start, "-", row_end, ")")
-    } else {
-      caption
-    }
-    
-    cap <- wrap_caption(this_caption, dev_width, margin_in)
-    ## Title block height scales with how many lines the caption wrapped
-    ## to, so a long descriptive caption never overlaps the table below
-    ## it - see wrap_caption()'s note on why this is a heuristic.
-    title_block_in <- margin_in + 0.1 + cap$n_lines * 0.24
-    
-    grid::grid.newpage()
-    grid::pushViewport(grid::viewport(width = grid::unit(dev_width, "in"), height = grid::unit(dev_height, "in")))
-    grid::grid.text(cap$text, x = grid::unit(margin_in, "in"), y = grid::unit(dev_height - margin_in, "in"),
-                    just = c("left", "top"), gp = grid::gpar(fontsize = 12, fontface = "bold"))
-    
-    tt <- gridExtra::ttheme_default(base_size = table_fontsize,
-                                    core = list(padding = grid::unit(c(2, 2), "mm")))
-    g <- gridExtra::tableGrob(d_chunk, rows = NULL, theme = tt)
-    
-    g_w_in <- sum(grid::convertWidth(g$widths, "in", valueOnly = TRUE))
-    g_h_in <- sum(grid::convertHeight(g$heights, "in", valueOnly = TRUE))
-    avail_w_in <- dev_width - 2 * margin_in
-    avail_h_in <- dev_height - title_block_in - 2 * margin_in
-    scale_factor <- min(1, avail_w_in / g_w_in, avail_h_in / g_h_in)
-    
-    grid::pushViewport(grid::viewport(
-      x = grid::unit(dev_width / 2, "in"), y = grid::unit((dev_height - title_block_in - margin_in) / 2, "in"),
-      width = grid::unit(g_w_in * scale_factor, "in"), height = grid::unit(g_h_in * scale_factor, "in")
-    ))
-    grid::grid.draw(g)
-    grid::popViewport(2)
-  }
-  invisible(NULL)
-}
-
-## Reads one CSV and hands it to add_pdf_table_page_df() above.
+## Renders one CSV as one or more captioned table pages (split into
+## chunks of quick_pdf_max_rows_per_page rows if the table is longer than
+## that, with "(continued, rows X-Y)" appended to the caption for chunks
+## after the first, so a long table is never silently cut off). Numeric
+## columns are rounded to 1 decimal for a tidier display; column names
+## have dots/underscores replaced with spaces. The table grob is scaled
+## down (preserving its own proportions - never stretched/squished) to
+## fit within the page if it would otherwise overflow.
 add_pdf_table_page <- function(csv_path, caption, dev_width, dev_height,
                                margin_in = 0.4, table_fontsize = quick_pdf_table_fontsize,
                                max_rows_per_page = quick_pdf_max_rows_per_page) {
@@ -506,25 +368,62 @@ add_pdf_table_page <- function(csv_path, caption, dev_width, dev_height,
     message("  Skipping empty CSV in quick-review PDF: ", basename(csv_path))
     return(invisible(NULL))
   }
-  add_pdf_table_page_df(d, caption, dev_width, dev_height, margin_in, table_fontsize, max_rows_per_page)
+
+  for (cn in names(d)) {
+    if (is.numeric(d[[cn]])) d[[cn]] <- round(d[[cn]], 1)
+  }
+  names(d) <- gsub("[._]", " ", names(d))
+
+  n_chunks <- ceiling(nrow(d) / max_rows_per_page)
+  for (chunk_i in seq_len(n_chunks)) {
+    row_start <- (chunk_i - 1) * max_rows_per_page + 1
+    row_end <- min(chunk_i * max_rows_per_page, nrow(d))
+    d_chunk <- d[row_start:row_end, , drop = FALSE]
+
+    this_caption <- if (chunk_i > 1) {
+      paste0(caption, " (continued, rows ", row_start, "-", row_end, ")")
+    } else if (n_chunks > 1) {
+      paste0(caption, " (rows ", row_start, "-", row_end, ")")
+    } else {
+      caption
+    }
+
+    grid::grid.newpage()
+    grid::pushViewport(grid::viewport(width = grid::unit(dev_width, "in"), height = grid::unit(dev_height, "in")))
+    grid::grid.text(this_caption, x = grid::unit(margin_in, "in"), y = grid::unit(dev_height - margin_in, "in"),
+                    just = c("left", "top"), gp = grid::gpar(fontsize = 12, fontface = "bold"))
+
+    tt <- gridExtra::ttheme_default(base_size = table_fontsize,
+                                    core = list(padding = grid::unit(c(2, 2), "mm")))
+    g <- gridExtra::tableGrob(d_chunk, rows = NULL, theme = tt)
+
+    g_w_in <- sum(grid::convertWidth(g$widths, "in", valueOnly = TRUE))
+    g_h_in <- sum(grid::convertHeight(g$heights, "in", valueOnly = TRUE))
+    avail_w_in <- dev_width - 2 * margin_in
+    avail_h_in <- dev_height - 1 - 2 * margin_in  # reserve ~1in for the title area
+    scale_factor <- min(1, avail_w_in / g_w_in, avail_h_in / g_h_in)
+
+    grid::pushViewport(grid::viewport(
+      x = grid::unit(dev_width / 2, "in"), y = grid::unit((dev_height - 1 - margin_in) / 2, "in"),
+      width = grid::unit(g_w_in * scale_factor, "in"), height = grid::unit(g_h_in * scale_factor, "in")
+    ))
+    grid::grid.draw(g)
+    grid::popViewport(2)
+  }
+  invisible(NULL)
 }
 
 ## Renders one PNG as a single captioned figure page, scaled to fit the
 ## available page area while preserving its true aspect ratio (read
 ## directly from the PNG's own pixel dimensions via png::readPNG() - this
 ## needs the actual decoded image array, not just its header dimensions,
-## since grid::grid.raster() draws from pixel data). The title block
-## above the image scales with the wrapped caption's line count, same as
-## the table pages above.
+## since grid::grid.raster() draws from pixel data).
 add_pdf_image_page <- function(png_path, caption, dev_width, dev_height, margin_in = 0.4) {
-  cap <- wrap_caption(caption, dev_width, margin_in)
-  title_block_in <- margin_in + 0.1 + cap$n_lines * 0.24
-  
   grid::grid.newpage()
   grid::pushViewport(grid::viewport(width = grid::unit(dev_width, "in"), height = grid::unit(dev_height, "in")))
-  grid::grid.text(cap$text, x = grid::unit(margin_in, "in"), y = grid::unit(dev_height - margin_in, "in"),
+  grid::grid.text(caption, x = grid::unit(margin_in, "in"), y = grid::unit(dev_height - margin_in, "in"),
                   just = c("left", "top"), gp = grid::gpar(fontsize = 12, fontface = "bold"))
-  
+
   img <- tryCatch(png::readPNG(png_path), error = function(e) NULL)
   if (is.null(img)) {
     grid::grid.text(paste0("Could not read image: ", basename(png_path)),
@@ -533,13 +432,14 @@ add_pdf_image_page <- function(png_path, caption, dev_width, dev_height, margin_
     grid::popViewport()
     return(invisible(NULL))
   }
-  
+
   img_h_px <- dim(img)[1]
   img_w_px <- dim(img)[2]
+  title_space_in <- 0.6
   avail_w_in <- dev_width - 2 * margin_in
-  avail_h_in <- dev_height - title_block_in - margin_in
+  avail_h_in <- dev_height - title_space_in - 2 * margin_in
   img_ratio <- img_h_px / img_w_px
-  
+
   if (avail_w_in * img_ratio <= avail_h_in) {
     draw_w_in <- avail_w_in
     draw_h_in <- avail_w_in * img_ratio
@@ -547,73 +447,50 @@ add_pdf_image_page <- function(png_path, caption, dev_width, dev_height, margin_
     draw_h_in <- avail_h_in
     draw_w_in <- avail_h_in / img_ratio
   }
-  
+
   grid::grid.raster(img,
                     x = grid::unit(dev_width / 2, "in"),
-                    y = grid::unit(dev_height - title_block_in - margin_in - draw_h_in / 2, "in"),
+                    y = grid::unit(dev_height - title_space_in - margin_in - draw_h_in / 2, "in"),
                     width = grid::unit(draw_w_in, "in"), height = grid::unit(draw_h_in, "in"))
   grid::popViewport()
   invisible(NULL)
 }
 
-## Orchestrator: optionally leads with the SiteMeta.xlsx table (Table 1,
-## matching how the Step3 snapshot report opens with its site metadata
-## table), then scans outDir for every CSV and PNG and builds one
-## captioned page for each, saved as
+## Orchestrator: scans outDir for every CSV and PNG, builds one PDF
+## containing a captioned page for each, saved as
 ## <pcode>_<order>_<season>_<year>.pdf directly inside outDir. CSVs are
 ## rendered first (in alphabetical order), then PNGs (also alphabetical).
-## Table/Figure numbers restart at 1 for each PDF, since each one is
-## meant to stand alone as its own deliverable.
 ## Safe to call even if outDir has no CSVs/PNGs yet (just skips with a
 ## message) - callers should still wrap this in tryCatch, since a failure
 ## partway through (e.g. a single corrupt PNG) should not be allowed to
 ## abort the rest of that park's processing.
-build_quick_pdf_for_folder <- function(outDir, pcode, parkname, order, season, year, sitemeta_path = NULL) {
+build_quick_pdf_for_folder <- function(outDir, pcode, order, season, year) {
   csv_files <- list.files(outDir, pattern = "\\.csv$", full.names = TRUE)
   png_files <- list.files(outDir, pattern = "\\.png$", full.names = TRUE)
-  has_sitemeta <- !is.null(sitemeta_path) && file.exists(sitemeta_path)
-  
-  if (length(csv_files) == 0 && length(png_files) == 0 && !has_sitemeta) {
-    message("  No CSVs, PNGs, or SiteMeta.xlsx found for ", outDir, " - skipping quick-review PDF for this folder.")
+
+  if (length(csv_files) == 0 && length(png_files) == 0) {
+    message("  No CSVs or PNGs found in ", outDir, " - skipping quick-review PDF for this folder.")
     return(invisible(NULL))
   }
-  
+
   pdf_path <- file.path(outDir, paste0(pcode, "_", order, "_", season, "_", year, ".pdf"))
-  
+
   grDevices::pdf(pdf_path, width = quick_pdf_width, height = quick_pdf_height)
   on.exit(grDevices::dev.off(), add = TRUE)
-  
-  table_num <- 1
-  fig_num <- 1
-  
-  if (has_sitemeta) {
-    tryCatch({
-      site_df <- openxlsx::read.xlsx(sitemeta_path)
-      cap <- sprintf(
-        "Table %d. Metadata for acoustical monitoring sites at %s (%s). Dates reflect each site's recorded NVSPL deployment period(s).",
-        table_num, parkname, pcode)
-      add_pdf_table_page_df(site_df, cap, quick_pdf_width, quick_pdf_height)
-      table_num <- table_num + 1
-    }, error = function(e) message("  Could not add SiteMeta.xlsx table to quick-review PDF: ", conditionMessage(e)))
-  }
-  
+
   for (f in sort(csv_files)) {
-    cap <- sprintf("Table %d. %s", table_num, get_csv_caption(f, pcode, parkname, season, year))
     tryCatch(
-      add_pdf_table_page(f, cap, quick_pdf_width, quick_pdf_height),
+      add_pdf_table_page(f, get_csv_caption(f), quick_pdf_width, quick_pdf_height),
       error = function(e) message("  Could not add table page for ", basename(f), ": ", conditionMessage(e))
     )
-    table_num <- table_num + 1
   }
   for (f in sort(png_files)) {
-    cap <- sprintf("Figure %d. %s", fig_num, get_png_caption(f, pcode, parkname, season, year))
     tryCatch(
-      add_pdf_image_page(f, cap, quick_pdf_width, quick_pdf_height),
+      add_pdf_image_page(f, get_png_caption(f), quick_pdf_width, quick_pdf_height),
       error = function(e) message("  Could not add image page for ", basename(f), ": ", conditionMessage(e))
     )
-    fig_num <- fig_num + 1
   }
-  
+
   message("  Quick-review PDF saved to: ", pdf_path)
   invisible(pdf_path)
 }
@@ -2225,14 +2102,10 @@ for (r in seq_len(nrow(run_combos))) {
   ## Built last, after every CSV/PNG for this order/season/year combo has
   ## been written above. Wrapped in tryCatch so a problem here (e.g. a
   ## single unreadable PNG) cannot abort processing of the remaining
-  ## season/year combos for this park. sitemeta_path is pulled from the
-  ## SitesMeta build in Section 9b if it ran and produced a file; if that
-  ## section was skipped/disabled or never wrote a file, this just passes
-  ## NULL and the quick-review PDF proceeds without the SiteMeta table.
+  ## season/year combos for this park.
   if (build_quick_pdf) {
     tryCatch(
-      build_quick_pdf_for_folder(outDir, park_code, parkname, order, season, year,
-                                 sitemeta_path = if (exists("sitemeta_path", inherits = TRUE)) sitemeta_path else NULL),
+      build_quick_pdf_for_folder(outDir, park_code, order, season, year),
       error = function(e) message("  Quick-review PDF generation failed for this folder (",
                                   conditionMessage(e), ") - continuing without it.")
     )
@@ -2297,221 +2170,4 @@ if (build_trends) {
           rows[[length(rows) + 1]] <- d
         }
       }
-      if (length(rows) == 0) return(NULL)
-      dplyr::bind_rows(rows)
-    }
-    
-    seasons_present <- unique(trend_meta$season)
-    
-    ## Filters a combined long-format dataframe down to one season and
-    ## builds a chronological (by year) x-axis factor for it, plus the
-    ## per-season output subfolder. Returns NULL if that season doesn't
-    ## have at least 2 distinct years - a single-year season has nothing
-    ## to trend against.
-    prep_season_subset <- function(df, season_name) {
-      df1 <- df %>% filter(season == season_name)
-      yrs <- sort(unique(df1$year))
-      if (length(yrs) < 2) return(NULL)
-      df1$year <- factor(df1$year, levels = yrs)
-      df1
-    }
-    
-    season_out_dir <- function(season_name) {
-      d <- file.path(trends_dir, season_name)
-      dir.create(d, recursive = TRUE, showWarnings = FALSE)
-      d
-    }
-    
-    ## -- 1) ambfullsum: LA10/LA50/LAnat/LA90 x Day/Night, per site, per season --
-    amb_trend <- combine_csvs_by_pattern("^ambfullsum_.*\\.csv$")
-    if (!is.null(amb_trend) && all(c("SiteID","Time","LA10","LA50","LAnat","LA90") %in% names(amb_trend))) {
-      for (sea in seasons_present) {
-        df_sea <- prep_season_subset(amb_trend, sea)
-        if (is.null(df_sea)) next
-        out_dir_sea <- season_out_dir(sea)
-        
-        amb_long <- df_sea %>%
-          pivot_longer(cols = c(LA10, LA50, LAnat, LA90), names_to = "Metric", values_to = "Value") %>%
-          mutate(Metric = factor(Metric, levels = c("LA10","LA50","LAnat","LA90")),
-                 Time = factor(Time, levels = c("Day","Night")))
-        
-        for (site in unique(amb_long$SiteID)) {
-          df1 <- amb_long %>% filter(SiteID == site)
-          p <- ggplot(df1, aes(x = year, y = Value, color = Metric, linetype = Time, group = interaction(Metric, Time))) +
-            geom_line(linewidth = 0.9) + geom_point(size = 2) +
-            scale_color_brewer(palette = "Set1") +
-            labs(title = paste0(site, ": Ambient Sound Level Trend (", sea, ")"),
-                 x = "Year", y = "Sound Level (dBA)", color = "Metric", linetype = "Time") +
-            theme_classic(base_size = 11)
-          safe_ggsave(file.path(out_dir_sea, paste0(safe_name(site), "_trend_AmbientLevels.png")),
-                      plot = p, width = 9, height = 5.5)
-        }
-      }
-      message("  Ambient level trends: done.")
-    } else {
-      message("  Skipping ambfullsum trends (no matching files found).")
-    }
-    
-    ## -- 2) timeabove: 4 dB thresholds x Day/Night, per site per season per frequency band --
-    ta_trend <- combine_csvs_by_pattern("^timeabove_.*\\.csv$")
-    if (!is.null(ta_trend) && "Site.ID" %in% names(ta_trend)) {
-      names(ta_trend)[names(ta_trend) == "Site.ID"] <- "SiteID"
-    }
-    if (!is.null(ta_trend) && all(c("SiteID","Frequency..Hz.") %in% names(ta_trend))) {
-      names(ta_trend)[names(ta_trend) == "Frequency..Hz."] <- "FreqBand"
-      value_cols <- grep("^X?35|^X?45|^X?52|^X?60", names(ta_trend), value = TRUE)
-      
-      for (sea in seasons_present) {
-        df_sea <- prep_season_subset(ta_trend, sea)
-        if (is.null(df_sea)) next
-        out_dir_sea <- season_out_dir(sea)
-        
-        ta_long <- df_sea %>%
-          pivot_longer(cols = all_of(value_cols), names_to = "col", values_to = "Value") %>%
-          mutate(
-            dB = str_extract(col, "35|45|52|60"),
-            DayNight = ifelse(grepl("Night", col), "Night", "Day"),
-            dB = factor(dB, levels = c("35","45","52","60"))
-          )
-        
-        for (site in unique(ta_long$SiteID)) {
-          for (fb in unique(ta_long$FreqBand[ta_long$SiteID == site])) {
-            df1 <- ta_long %>% filter(SiteID == site, FreqBand == fb)
-            if (nrow(df1) == 0) next
-            p <- ggplot(df1, aes(x = year, y = Value, color = dB, linetype = DayNight, group = interaction(dB, DayNight))) +
-              geom_line(linewidth = 0.9) + geom_point(size = 2) +
-              scale_color_brewer(palette = "Set1") +
-              labs(title = paste0(site, ": Time Above Threshold Trend (", sea, ", ", fb, ")"),
-                   x = "Year", y = "Time Above Threshold (%)", color = "dB Threshold", linetype = "Time") +
-              theme_classic(base_size = 11)
-            safe_ggsave(file.path(out_dir_sea, paste0(safe_name(site), "_trend_TimeAbove_", safe_name(fb), ".png")),
-                        plot = p, width = 9, height = 5.5)
-          }
-        }
-      }
-      message("  Time-above trends: done.")
-    } else {
-      message("  Skipping timeabove trends (no matching files found).")
-    }
-    
-    ## -- 3) impactlisteningarea: Impact (dB) and LAR (%) as separate plots, per season --
-    imp_trend <- combine_csvs_by_pattern("^impactlisteningarea_.*\\.csv$")
-    if (!is.null(imp_trend) && all(c("SiteID","DayImpact","NightImpact","AllImpact","DayLAR","NightLAR","AllLAR") %in% names(imp_trend))) {
-      for (sea in seasons_present) {
-        df_sea <- prep_season_subset(imp_trend, sea)
-        if (is.null(df_sea)) next
-        out_dir_sea <- season_out_dir(sea)
-        
-        imp_long_impact <- df_sea %>%
-          pivot_longer(cols = c(DayImpact, NightImpact, AllImpact), names_to = "Period", values_to = "Impact") %>%
-          mutate(Period = factor(gsub("Impact", "", Period), levels = c("Day","Night","All")))
-        imp_long_lar <- df_sea %>%
-          pivot_longer(cols = c(DayLAR, NightLAR, AllLAR), names_to = "Period", values_to = "LAR") %>%
-          mutate(Period = factor(gsub("LAR", "", Period), levels = c("Day","Night","All")))
-        
-        for (site in unique(df_sea$SiteID)) {
-          df_i <- imp_long_impact %>% filter(SiteID == site)
-          p1 <- ggplot(df_i, aes(x = year, y = Impact, color = Period, group = Period)) +
-            geom_line(linewidth = 0.9) + geom_point(size = 2) +
-            scale_color_brewer(palette = "Dark2") +
-            labs(title = paste0(site, ": Noise Impact Trend (", sea, ")"), x = "Year",
-                 y = "Impact (dBA, Existing - Natural)", color = NULL) +
-            theme_classic(base_size = 11)
-          safe_ggsave(file.path(out_dir_sea, paste0(safe_name(site), "_trend_Impact.png")), plot = p1, width = 9, height = 5.5)
-          
-          df_l <- imp_long_lar %>% filter(SiteID == site)
-          p2 <- ggplot(df_l, aes(x = year, y = LAR, color = Period, group = Period)) +
-            geom_line(linewidth = 0.9) + geom_point(size = 2) +
-            scale_color_brewer(palette = "Dark2") +
-            labs(title = paste0(site, ": Listening Area Reduction Trend (", sea, ")"), x = "Year",
-                 y = "Listening Area Reduction (%)", color = NULL) +
-            theme_classic(base_size = 11)
-          safe_ggsave(file.path(out_dir_sea, paste0(safe_name(site), "_trend_ListeningAreaReduction.png")), plot = p2, width = 9, height = 5.5)
-        }
-      }
-      message("  Impact / listening area reduction trends: done.")
-    } else {
-      message("  Skipping impactlisteningarea trends (no matching files found).")
-    }
-    
-    ## -- 4) NoiseFreeInterval: daily mean per percentile, per site, per season --
-    nfi_trend <- combine_csvs_by_pattern("_NoiseFreeInterval_.*\\.csv$")
-    if (!is.null(nfi_trend) && all(c("Percentile","SiteID") %in% names(nfi_trend))) {
-      hour_cols <- grep("^X?[0-2][0-9]h?$", names(nfi_trend), value = TRUE)
-      nfi_trend$DailyMean <- rowMeans(nfi_trend[, hour_cols], na.rm = TRUE)
-      
-      for (sea in seasons_present) {
-        df_sea <- prep_season_subset(nfi_trend, sea)
-        if (is.null(df_sea)) next
-        out_dir_sea <- season_out_dir(sea)
-        
-        df_sea <- df_sea %>% mutate(Percentile = factor(Percentile, levels = c("90%","50%","10%","Mean")))
-        
-        for (site in unique(df_sea$SiteID)) {
-          df1 <- df_sea %>% filter(SiteID == site)
-          p <- ggplot(df1, aes(x = year, y = DailyMean, color = Percentile, group = Percentile)) +
-            geom_line(linewidth = 0.9) + geom_point(size = 2) +
-            scale_color_manual(values = c("90%" = "#4C72B0", "50%" = "#55A868", "10%" = "#C44E52", "Mean" = "black")) +
-            labs(title = paste0(site, ": Noise-Free Interval Trend (", sea, ", 24-hr Average)"),
-                 x = "Year", y = "Mean Noise-Free Interval (sec)", color = "Percentile") +
-            theme_classic(base_size = 11)
-          safe_ggsave(file.path(out_dir_sea, paste0(safe_name(site), "_trend_NoiseFreeInterval.png")), plot = p, width = 9, height = 5.5)
-        }
-      }
-      message("  Noise-free interval trends: done.")
-    } else {
-      message("  Skipping NoiseFreeInterval trends (no matching files found).")
-    }
-    
-    ## -- 5) EventCountsLengths: top N sources by average count, per site, per season --
-    ecl_trend <- combine_csvs_by_pattern("_EventCountsLengths_.*\\.csv$")
-    if (!is.null(ecl_trend) && all(c("SiteID","Source Description","Day_Count","Night_Count","Day_Length","Night_Length") %in% names(ecl_trend))) {
-      ecl_trend <- ecl_trend %>%
-        mutate(AvgCount = rowMeans(cbind(Day_Count, Night_Count), na.rm = TRUE),
-               AvgLength = rowMeans(cbind(Day_Length, Night_Length), na.rm = TRUE))
-      
-      for (sea in seasons_present) {
-        df_sea <- prep_season_subset(ecl_trend, sea)
-        if (is.null(df_sea)) next
-        out_dir_sea <- season_out_dir(sea)
-        
-        for (site in unique(df_sea$SiteID)) {
-          df1 <- df_sea %>% filter(SiteID == site)
-          
-          top_sources <- df1 %>%
-            group_by(`Source Description`) %>%
-            summarize(overall_avg = mean(AvgCount, na.rm = TRUE), .groups = "drop") %>%
-            arrange(desc(overall_avg)) %>%
-            slice_head(n = trend_top_n_sources) %>%
-            pull(`Source Description`)
-          
-          df_top <- df1 %>% filter(`Source Description` %in% top_sources)
-          if (nrow(df_top) == 0) next
-          
-          p1 <- ggplot(df_top, aes(x = year, y = AvgCount, color = `Source Description`, group = `Source Description`)) +
-            geom_line(linewidth = 0.9) + geom_point(size = 2) +
-            scale_color_brewer(palette = "Set2") +
-            labs(title = paste0(site, ": Top ", length(top_sources), " Noise Source Event Count Trend (", sea, ")"),
-                 x = "Year", y = "Average Daily Event Count", color = "Source") +
-            theme_classic(base_size = 11)
-          safe_ggsave(file.path(out_dir_sea, paste0(safe_name(site), "_trend_EventCount_TopSources.png")), plot = p1, width = 9.5, height = 5.5)
-          
-          p2 <- ggplot(df_top, aes(x = year, y = AvgLength, color = `Source Description`, group = `Source Description`)) +
-            geom_line(linewidth = 0.9) + geom_point(size = 2) +
-            scale_color_brewer(palette = "Set2") +
-            labs(title = paste0(site, ": Top ", length(top_sources), " Noise Source Event Length Trend (", sea, ")"),
-                 x = "Year", y = "Average Event Length (sec)", color = "Source") +
-            theme_classic(base_size = 11)
-          safe_ggsave(file.path(out_dir_sea, paste0(safe_name(site), "_trend_EventLength_TopSources.png")), plot = p2, width = 9.5, height = 5.5)
-        }
-      }
-      message("  Event count/length trends: done.")
-    } else {
-      message("  Skipping EventCountsLengths trends (no matching files found).")
-    }
-    
-    message(sprintf("Trend graphs written to: %s", trends_dir))
-  }
-}
-
-message("\nAll combinations processed.")
+      if (length(rows) == 0) return(

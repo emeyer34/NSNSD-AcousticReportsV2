@@ -13,6 +13,7 @@ AKR,Denali National Park and Preserve,DENABLCR,63.21919,-149.65857
 AKR,Denali National Park and Preserve,DENABLDR,63.32898,-149.34235
 AKR,Denali National Park and Preserve,DENABULL,63.39192,-149.62901
 AKR,Denali National Park and Preserve,DENABULL,63.39195,-149.62897
+AKR,Denali National Park and Preserve,DENABULL,63.39195,-149.62896
 AKR,Denali National Park and Preserve,DENACABN,63.57665,-150.00888
 AKR,Denali National Park and Preserve,DENACARB,63.60640,-150.83133
 AKR,Denali National Park and Preserve,DENACARB,63.60640,-150.83130
@@ -474,6 +475,8 @@ IMR,Walnut Canyon National Monument,WACA001,35.17367,-111.52240
 IMR,Walnut Canyon National Monument,WACA002,35.17731,-111.45950
 IMR,Walnut Canyon National Monument,WACA003,35.15623,-111.47660
 IMR,Washita Battlefield National Historic Site,WABA001,35.60917,-99.70072
+IMR,White Sands National Park,WHSA001,32.78073,-106.17259
+IMR,White Sands National Park,WHSA002,32.82338,-106.26714
 IMR,Yellowstone National Park,YELLACLN,44.48553,-110.16409
 IMR,Yellowstone National Park,YELLBEC1,44.13200,-111.02231
 IMR,Yellowstone National Park,YELLBTBC,44.93443,-110.59263
@@ -562,6 +565,8 @@ NCR,Wolf Trap National Park for the Performing Arts,WOTR001,38.93617,-77.26485
 NER,Appomattox Court House National Historical Park,APCO001,37.37348,-78.79803
 NER,Appomattox Court House National Historical Park,APCO002,37.38843,-78.77950
 NER,Cedar Creek and Belle Grove National Historical Park,CEBE001,39.00869,-78.30540
+NER,Flight 93 National Memorial,FLNI001,40.04803,-78.90229
+NER,Flight 93 National Memorial,FLNI002,40.06116,-78.89568
 NER,Katahdin Woods and Waters National Monument,KAWW001,46.05017,-68.57112
 NER,Minute Man National Historical Park,MIMA005,42.45445,-71.29340
 NER,Minute Man National Historical Park,MIMA006,42.46088,-71.31289
@@ -761,6 +766,7 @@ SER,Great Smoky Mountains National Park,GRSM015,35.71884,-83.60497
 SER,Great Smoky Mountains National Park,GRSM016,35.74207,-83.54267
 SER,Great Smoky Mountains National Park,GRSM017,35.58801,-83.82160
 SER,Great Smoky Mountains National Park,GRSM018,35.68771,-83.49911
+SER,Great Smoky Mountains National Park,GRSM019,35.65394,-83.44019
 SER,Guilford Courthouse National Military Park,GUCO001,36.13369,-79.84543
 SER,Guilford Courthouse National Military Park,GUCO002,36.13117,-79.84033
 SER,Gulf Islands National Seashore,GUIS001,30.32511,-87.27640
