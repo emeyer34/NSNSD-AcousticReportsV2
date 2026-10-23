@@ -1,5 +1,0 @@
-"SiteID","SrcID","Type","Source Type","SrcID.1","Source Description","Day_Count","Night_Count","24hr_Count","Day_Length","Night_Length","24hr_Length"
-"GAARITKI",0,0,"No Sound Audible",0,"No Sound Audible",0,0.3,0.3,0,0,0
-"GAARITKI",1.1,1,"Aircraft",1.1,"Jet",1,0,1,172.8,0,172.8
-"GAARITKI",1.2,1,"Aircraft",1.2,"Prop",0.6,0.2,0.8,245.1,162.5,226.8
-"GAARITKI",1.3,1,"Aircraft",1.3,"Helicopter",0.2,0,0.2,106.5,0,106.5
