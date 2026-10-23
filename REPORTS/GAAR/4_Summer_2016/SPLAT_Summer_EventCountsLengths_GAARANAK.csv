@@ -1,0 +1,4 @@
+"SiteID","SrcID","Type","Source Type","SrcID.1","Source Description","Day_Count","Night_Count","24hr_Count","Day_Length","Night_Length","24hr_Length"
+"GAARANAK",1.1,1,"Aircraft",1.1,"Jet",2,0.2,2.2,148.5,190,152.6
+"GAARANAK",1.2,1,"Aircraft",1.2,"Prop",11.3,1.4,12.8,104.9,128.5,107.6
+"GAARANAK",2,2,"Vehicles",2,"Vehicle",0.1,0.2,0.3,38,38.5,38.3

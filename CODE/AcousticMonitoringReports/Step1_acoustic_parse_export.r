@@ -41,7 +41,7 @@
 ## 0. CONFIG
 ## ---------------------------------------------------------------------
 
-plottitle    <- TRUE   # Produce titles on plots?
+plottitle    <- FALSE   # Produce titles on plots?
 plotHRDBA    <- TRUE   # Produce hourly dBA plot?
 plotTRUNCDBA <- TRUE   # Produce truncated hourly dBA plot?
 plotFREQDBA  <- TRUE   # Produce frequency dBA plot?
@@ -61,7 +61,7 @@ plotCONTOUR  <- TRUE   # Produce contour plot?
 ## yMinHr/yMaxHr/yMinHz/yMaxHz are still used as the FALLBACK whenever
 ## plotAUTO_Y is FALSE, so manual control remains available if you want
 ## consistent axes across a specific set of comparable sites.
-plotAUTO_Y <- TRUE
+plotAUTO_Y <- FALSE
 
 ## Padding added beyond each plot's actual data min/max before rounding
 ## outward to the nearest multiple of 3 (matching the existing tick-mark

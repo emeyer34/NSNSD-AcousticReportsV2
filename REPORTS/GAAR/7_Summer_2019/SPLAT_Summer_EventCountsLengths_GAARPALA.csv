@@ -1,0 +1,4 @@
+"SiteID","SrcID","Type","Source Type","SrcID.1","Source Description","Day_Count","Night_Count","24hr_Count","Day_Length","Night_Length","24hr_Length"
+"GAARPALA",0,0,"No Sound Audible",0,"No Sound Audible",0,0,0,0,0,0
+"GAARPALA",1.1,1,"Aircraft",1.1,"Jet",1.2,1.1,2.3,119.3,135.2,126.8
+"GAARPALA",1.2,1,"Aircraft",1.2,"Prop",2,0.1,2.1,167.6,329.3,173.6

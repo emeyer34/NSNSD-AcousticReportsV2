@@ -1,0 +1,4 @@
+"SiteID","SrcID","Type","Source Type","SrcID.1","Source Description","Day_Count","Night_Count","24hr_Count","Day_Length","Night_Length","24hr_Length"
+"GAARWALK",1.1,1,"Aircraft",1.1,"Jet",1.6,1.2,2.8,263.4,263.9,263.6
+"GAARWALK",1.2,1,"Aircraft",1.2,"Prop",2.3,0.2,2.5,442.2,370,436.4
+"GAARWALK",1.3,1,"Aircraft",1.3,"Helicopter",0.6,0.2,0.8,493.5,146,406.6

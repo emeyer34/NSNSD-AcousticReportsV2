@@ -1,0 +1,4 @@
+"SiteID","SrcID","Type","Source Type","SrcID.1","Source Description","Day_Count","Night_Count","24hr_Count","Day_Length","Night_Length","24hr_Length"
+"GAARKURU",0,0,"No Sound Audible",0,"No Sound Audible",0,0.2,0.2,0,0,0
+"GAARKURU",1.1,1,"Aircraft",1.1,"Jet",0.4,1.2,1.7,186.2,268.8,246.8
+"GAARKURU",1.2,1,"Aircraft",1.2,"Prop",0.2,0.1,0.2,334.3,177,295

@@ -52,15 +52,15 @@ site_symbol <- "star"
 site_symbol_color <- "black"   # fill color of the marker (for star: the star's own color)
 site_symbol_size  <- 5         # roughly comparable in visual weight across symbol types
 
-site_label_color <- "white"
-site_label_size  <- 3.5
+site_label_color <- "black"
+site_label_size  <- 4.0
 
 ## Mask/halo: a contrasting outline drawn behind labels/symbols so they
 ## stay legible regardless of what's underneath them on the basemap
 ## (satellite imagery in particular can be light or dark in unpredictable
 ## places). Set to FALSE to disable and get plain text/markers.
 use_label_mask  <- TRUE
-label_mask_color <- "black"
+label_mask_color <- "white"
 
 use_symbol_mask  <- TRUE
 symbol_mask_color <- "white"

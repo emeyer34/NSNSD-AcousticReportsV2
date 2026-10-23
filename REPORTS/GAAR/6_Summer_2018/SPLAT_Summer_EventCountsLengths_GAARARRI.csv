@@ -1,0 +1,4 @@
+"SiteID","SrcID","Type","Source Type","SrcID.1","Source Description","Day_Count","Night_Count","24hr_Count","Day_Length","Night_Length","24hr_Length"
+"GAARARRI",0,0,"No Sound Audible",0,"No Sound Audible",0,0.2,0.2,0,0,0
+"GAARARRI",1.1,1,"Aircraft",1.1,"Jet",0.4,0.1,0.5,112.8,109.1,111.9
+"GAARARRI",1.2,1,"Aircraft",1.2,"Prop",1.4,0.1,1.5,176.9,137.8,173.9

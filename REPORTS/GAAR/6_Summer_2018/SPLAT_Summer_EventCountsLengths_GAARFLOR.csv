@@ -1,0 +1,6 @@
+"SiteID","SrcID","Type","Source Type","SrcID.1","Source Description","Day_Count","Night_Count","24hr_Count","Day_Length","Night_Length","24hr_Length"
+"GAARFLOR",1.1,1,"Aircraft",1.1,"Jet",3.8,1.2,5.1,253.6,277.6,259.4
+"GAARFLOR",1.14,1,"Aircraft",1.14,"Jet, Military",0,0.2,0.2,0,95.6,95.6
+"GAARFLOR",1.2,1,"Aircraft",1.2,"Prop",7,0.7,7.7,390.6,304.7,382.8
+"GAARFLOR",1.3,1,"Aircraft",1.3,"Helicopter",0.1,0,0.1,548,0,548
+"GAARFLOR",3,3,"Watercraft",3,"Watercraft",0.1,0,0.1,252.8,0,252.8
