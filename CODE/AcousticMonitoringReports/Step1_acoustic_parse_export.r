@@ -112,7 +112,7 @@ plotAUTO_Y_scope <- "global"   # "global" or "per_site"
 ## group specifically wants every top1/top2 figure in a report to share
 ## one consistent y-axis range rather than each being independently
 ## zoomed.
-plotAUTO_Y_paud <- FALSE
+plotAUTO_Y_paud <- TRUE
 autoscale_pad_frac_paud <- 0.10   # headroom above the global max, as a fraction of that max
 
 ## -- Color palette (applies to BOTH the Top Noise Source(s) bar charts
@@ -345,6 +345,8 @@ npsunits <- tryCatch(
 ## same name/purpose also exists independently in Step4's Rmd, for
 ## formatting the SPLAT event-length table there - the two are not shared
 ## code, just the same small conversion needed in two places.)
+is_noise_src <- function(id) !is.na(id) & id >= 1 & id <= 20
+
 sec_to_mmss <- function(x) {
   x <- round(as.numeric(x))
   m <- x %/% 60
@@ -2379,9 +2381,9 @@ for (r in seq_len(nrow(run_combos))) {
     catfinal1 <- catcombined[, c(1:3, 28)]
     colnames(catfinal1) <- c("SrcID","SiteID","SourceType","Percent")
     firstnoise <- catfinal1 %>%
-      filter(SrcID <= 20) %>% group_by(SiteID) %>% top_n(1, Percent) %>% mutate(rank = 1)
+      filter(is_noise_src(SrcID)) %>% group_by(SiteID) %>% top_n(1, Percent) %>% mutate(rank = 1)
     secondnoise <- catfinal1 %>%
-      filter(SrcID <= 20) %>% group_by(SiteID) %>% top_n(2, Percent) %>% top_n(-1, Percent) %>% mutate(rank = 2)
+      filter(is_noise_src(SrcID)) %>% group_by(SiteID) %>% top_n(2, Percent) %>% top_n(-1, Percent) %>% mutate(rank = 2)
   }
   
   ## -- Executive summary table -------------------------------------------
