@@ -160,7 +160,7 @@ extent_inset_label_color <- "black"      # color of the state/country name text 
 ##                          ignoring site locations for framing purposes
 ##                          (sites still draw, but may fall outside frame
 ##                          if they're outside the boundary).
-extent_center_on <- "boundary_and_sites"
+extent_center_on <- "boundary"
 
 ## ---------------------------------------------------------------------
 ## 1. PACKAGES

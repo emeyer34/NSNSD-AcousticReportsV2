@@ -233,7 +233,31 @@ include_graphics_ar <- function(path, width_frac, content_width_in = report_cont
   cat(paste0("\n\n![](", path, "){width=", out_w_in, "in height=", out_h_in, "in fig-align=\"center\"}\n\n"))
   invisible(NULL)
 }
+## ---- Mirror of Step 1 figure-design settings (keep in sync) ----
+noise_color_palette <- "blue_amber"
+heatstrip_normalize <- TRUE
+heatstrip_sort_mode <- "category_then_audibility"
 
+palette_words <- list(
+  purple_coral     = c("purple", "coral"),
+  blue_amber       = c("blue", "amber"),
+  deep_purple_gold = c("deep purple", "gold"),
+  orange_red       = c("orange", "red"))
+col_primary   <- palette_words[[noise_color_palette]][1]
+col_secondary <- palette_words[[noise_color_palette]][2]
+cap_first <- function(x) paste0(toupper(substring(x, 1, 1)), substring(x, 2))
+
+heatstrip_sort_txt <- if (heatstrip_sort_mode == "category_then_audibility") {
+  "Noise sources are listed first and natural sources second, separated by a thin horizontal line. Within each group, sources are sorted from most to least audible."
+} else {
+  "Sources are sorted from most to least audible, with noise and natural sources intermixed."
+}
+
+heatstrip_shade_txt <- if (heatstrip_normalize) {
+  "Shading in each row is scaled to that source's own lowest and highest hourly values, so it shows when that source is most audible. Shading cannot be compared between rows."
+} else {
+  "Shading uses a single scale shared by all rows, so darker cells indicate a higher percent time audible and shading can be compared between rows."
+}
 ```
 
 
@@ -1036,7 +1060,7 @@ List of Terms or Acronyms
 
 **Amplitude:** The relative strength of a sound wave, described in decibels (dB). Amplitude is related to what we commonly call loudness or volume.
 
-**ANS Weighting:** The Natural Sounds modification to A-weighting eliminates high-frequency sound (leaf rustle, equipment noise, and biologic sounds) allowing for more accurate comparisons of low-frequency ambient sound levels across different land use types (e.g., urban, protected areas; ANSI S3/SC1.100, 2014 [R2020]). This frequency weighting scheme improves ambient sound level measurements in quiet environments.
+**ANS Weighting:** The noise-compensated modification to A-weighting eliminates high-frequency sound (leaf rustle, equipment noise, and biologic sounds) allowing for more accurate comparisons of low-frequency ambient sound levels across different land use types (e.g., urban, protected areas; ANSI S3/SC1.100, 2014 [R2020]). This frequency weighting scheme improves ambient sound level measurements in quiet environments.
 
 **Audibility:** The ability of animals with normal hearing, including humans, to hear a given sound. It can vary depending upon the frequency content and amplitude of sound and by hearing ability of individual animals.
 
@@ -1135,7 +1159,7 @@ flextable(tab1) %>%
 
 Overall, existing ambient sound levels (L~A50~) at sites within `r (pcode)` ranged from `r (l50d_min)` – `r (l50d_max)` dB during the day and `r (l50n_min)`-`r (l50n_max)` dB at night during the sampling period. Table(s) `r ( ta_tab_start_1)` **- `r ( ta_tab_end_1)`**  reports the percent of time that measured levels at the monitoring locations were above four key sound level values. The first value, 35 dB (L~Aeq,~~1s~), is used by the NPS as an indicator of overall quality of the acoustic environment. Beyond this level, noise begins to negatively affect the visitor experience in an otherwise natural acoustic environment (Pilcher et al. 2009; Watts et al. 2020; Betchkal et al. 2023). As wildlife begin to exhibit signs of disturbance at noise levels as low as 40 dB (Shannon et al. 2016), 45 dB represents a conservative estimate of negative effects on wildlife. The third value, 52 dB (L~Aeq,~~1s~), is based on the EPA's speech interference level for speaking in a raised voice to an audience at 10 meters (EPA 1974). This value addresses the effects of sound on interpretive presentations in parks. The final value, 60 dB (L~Aeq,~~1s~), provides a basis for estimating speech interference on normal voice communications at 1 meter. Visitors viewing scenic areas in the park would likely be conducting such conversations. 
 
-Sound levels are often measured over narrow frequency bands (typically in one-third octave bands between 12.5 Hz – 20 kHz) because these smaller bands closely represent how humans distinguish between frequencies of sound. In this study, we examine how often sound levels exceeded key values in two frequency ranges. The top value in each split-cell of Table(s) `r ( ta_tab_start_1)` **- `r ( ta_tab_end_1)`**  uses the full frequency range (12.5 Hz – 20 kHz) collected, whereas the bottom value focuses on frequencies affected by low frequency noise sources (20 – 1,250 Hz). This Natural Sounds modification to A-weighting ((referred to as A-weighted Natural Sounds (ANS) weighting, ASA/ANSI S3/SC1.100-2014 [2020]) eliminates high-frequency sound (leaf rustle, equipment noise, and biologic sounds) allowing for more accurate comparisons of low-frequency ambient sound levels across different land use types (e.g., urban, protected areas; ASA/ANSI S3/SC1.100-2014 [2020]). This frequency weighting scheme improves ambient sound level measurements in quiet environments. For instance, in the full frequency range, the 35 dB (L~Aeq,~~1s~) level was exceeded at **!-- Reminder:UPDATE SITE (CHOOSE FROM TABLE) `r (pcode)`00X 16.74 %** of the time during the day and **!-- Reminder:UPDATE DATA (FROM TABLE AND SITE CHOSEN) 3.31 %** of the time at night, **!-- Reminder:UPDATE TEXT (DESCRIBE CHOSEN SITE) --!  in the 20 – 1,250 Hz range, the 35 dB functional sound level value was very rarely exceeded in daytime or nighttime**. Speech interruption (between two people 1 meter apart) occurs at 60 dB (~LAeq,~~1s~) and this level was rarely exceeded at any of the sites. 
+Sound levels are often measured over narrow frequency bands (typically in one-third octave bands between 12.5 Hz – 20 kHz) because these smaller bands closely represent how humans distinguish between frequencies of sound. In this study, we examine how often sound levels exceeded key values in two frequency ranges. For each site/year combination in of Table(s) `r ( ta_tab_start_1)` **- `r ( ta_tab_end_1)`**  we present the full frequency range (12.5 Hz – 20 kHz) collected, and frequencies affected by low frequency noise sources (20 – 1,250 Hz). This modification to A-weighting (referred to as A-weighted, noise-compensated (ANS) weighting, ASA/ANSI S3/SC1.100-2014 [2020])  eliminates high-frequency sound (leaf rustle, equipment noise, and biologic sounds) allowing for more accurate comparisons of low-frequency ambient sound levels across different land use types (e.g., urban, protected areas; ASA/ANSI S3/SC1.100-2014 [2020]). For instance, in the full frequency range, the 35 dB (L~Aeq,~~1s~) level was exceeded at **!-- Reminder:UPDATE SITE (CHOOSE FROM TABLE) `r (pcode)`00X 16.74 %** of the time during the day and **!-- Reminder:UPDATE DATA (FROM TABLE AND SITE CHOSEN) 3.31 %** of the time at night, **!-- Reminder:UPDATE TEXT (DESCRIBE CHOSEN SITE) --!  in the 20 – 1,250 Hz range, the 35 dB functional sound level value was very rarely exceeded in daytime or nighttime**. Speech interruption (between two people 1 meter apart) occurs at 60 dB (~LAeq,~~1s~) and this level was rarely exceeded at any of the sites. 
 
 
 <br>
@@ -2124,16 +2148,20 @@ for (i in seq_along(papngfiles)) {
   cat(paste0("![](", f, ")\n"))
 
   styled_block("sr Figure caption",
-    "Figure ", pa_fig_list[[i]], ". Hourly time audible for the top noise sources and all noise sources at ",
+    "Figure ", pa_fig_list[[i]], ". Hourly percent time audible for total human-caused noise (gray bars) and the two most audible noise sources (",
+    col_primary, " and ", col_secondary, " bars, shown side by side within each gray bar) at ",
     figsites[i], " in ", figseasons[i], ", ", figyears[i], "."
   )
 
   styled_block("sr Image credit", "NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION")
 
   styled_block("sr Alternate text",
-    "Figure ", pa_fig_list[[i]], ". Hourly time audible for the top noise sources and all noise sources at ",
+    "Figure ", pa_fig_list[[i]], ". Hourly percent time audible for total human-caused noise (gray bars) and the two most audible noise sources (",
+    col_primary, " and ", col_secondary, " bars, shown side by side within each gray bar) at ",
     figsites[i], " in ", figseasons[i], ", ", figyears[i],
-    ". A bar chart depicts the percent time audible on the y-axis and time of day by the hour on the x-axis. A grey bar depicts the percent of time within an hour where noise is audible. Within that grey bar, the top noise sources are displayed in separate adjacent purple and salmon bars. Two noise sources are displayed unless only one prominent source is present at a site. **!-- Reminder:UPDATE EXAMPLE TEXT--! This graph shows noise is audible greater than 99% of the time at every hour of the day.**"
+    ". A bar chart shows percent time audible on the y-axis and hour of day, 00 to 23, on the x-axis. At each hour, a wide gray bar shows the percent of time that any human-caused noise was audible. Inside each gray bar, two narrower bars fill its width side by side: the ",
+    col_primary, " bar is the most audible noise source at this site and the ", col_secondary,
+    " bar is the second most audible. A legend above the plot lists the two sources in that order, followed by Total human audibility. Only one colored bar appears when a site has a single prominent source. Light dashed horizontal lines mark reference levels behind the bars. **!-- Reminder:UPDATE EXAMPLE TEXT--! This graph shows noise is audible greater than 99% of the time at every hour of the day.**"
   )
 
   cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")
@@ -2608,16 +2636,23 @@ for (i in seq_along(detpapngfiles)) {
   cat(paste0("![](", f, ")\n"))
 
   styled_block("sr Figure caption",
-    "Figure ", det_pa_fig_list[[i]], ". Comprehensive sound source description results from off-site listening at ",
-    figsites[i], " in ", figseasons[i], ", ", figyears[i], "."
+    "Figure ", det_pa_fig_list[[i]], ". Daily mean percent time audible (bars) and hourly pattern of audibility (24-hour shaded strip) for each individual sound source identified through off-site listening at ",
+    figsites[i], " in ", figseasons[i], ", ", figyears[i], ". ",
+    "Bar length is scaled to the most audible source in this figure. ",
+    cap_first(col_primary), " indicates noise sources and ", col_secondary, " indicates natural sources. ",
+    heatstrip_shade_txt
   )
 
   styled_block("sr Image credit", "NPS/NATURAL SOUNDS AND NIGHT SKIES DIVISION")
 
   styled_block("sr Alternate text",
-    "Figure ", det_pa_fig_list[[i]], ". The comprehensive sound source description results from off-site listening at ",
+    "Figure ", det_pa_fig_list[[i]], ". Daily mean percent time audible (bars) and hourly pattern of audibility (24-hour shaded strip) for each individual sound source identified through off-site listening at ",
     figsites[i], " in ", figseasons[i], ", ", figyears[i],
-    " are presented in a horizontal bar chart. The chart is divided into two panes: the left panel displays all identified noise sources, while the right panel features all identified natural sources. Sound source categories are listed on the Y-axis, with the percent time audible represented on the X-axis. Each category has bars extending from left to right, sorted in descending order. Noise sources on the left are indicated by green bars, while natural sources are represented by orange bars. **!-- Reminder:UPDATE TEXT--! Describe which source was most audible in each category at this site.**"
+    ". A horizontal chart lists each individual sound source identified at ", figsites[i],
+    ", one per row. Each row has three parts from left to right: the source name; a solid bar whose length shows the source's daily mean percent time audible, with the percentage printed at the end of the bar; and a strip of 24 shaded cells, one per hour from midnight through 11 p.m., showing when during the day the source was audible. Darker cells indicate hours of higher audibility. A 'Time of day' axis beneath the strip is labeled at hours 0, 6, 12, 18 and 23. Noise sources are ",
+    col_primary, " and natural sources are ", col_secondary,
+    ", as shown in a legend at the top of the chart. ", heatstrip_sort_txt, " ", heatstrip_shade_txt,
+    " **!-- Reminder:UPDATE TEXT--! Describe which noise and natural sources were most audible at this site.**"
   )
 
   cat("\n\n<p style='margin-bottom:20px;'>&nbsp;</p>\n\n")

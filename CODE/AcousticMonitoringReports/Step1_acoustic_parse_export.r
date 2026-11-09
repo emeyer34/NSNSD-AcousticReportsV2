@@ -41,27 +41,26 @@
 ## 0. CONFIG
 ## ---------------------------------------------------------------------
 
-plottitle    <- FALSE   # Produce titles on plots?
+plottitle    <- FALSE  # Produce titles on plots?
 plotHRDBA    <- TRUE   # Produce hourly dBA plot?
 plotTRUNCDBA <- TRUE   # Produce truncated hourly dBA plot?
 plotFREQDBA  <- TRUE   # Produce frequency dBA plot?
 plotCONTOUR  <- TRUE   # Produce contour plot?
 
 ## -- Y-axis auto-scaling ---------------------------------------------------
-## When TRUE (default), the hourly (DBAvHR/DBTvHR) and frequency content
-## (SPLvFREQ) plots each compute their OWN y-axis range from that specific
-## site/season's actual data, instead of using the fixed yMinHr/yMaxHr/
-## yMinHz/yMaxHz constants below for every plot. This fixes a real problem
-## with fixed limits: a manual range that comfortably fits a quiet
-## wilderness site will clip a loud site's data, and a range wide enough
-## for the loud site wastes most of its vertical space on the quiet site -
-## there's no single fixed range that fits well across sites/parks with
-## very different sound levels.
+## When TRUE, the hourly (DBAvHR/DBTvHR) and frequency content (SPLvFREQ)
+## plots each compute an auto-scaled y-axis range from real data instead
+## of the fixed yMinHr/yMaxHr/yMinHz/yMaxHz constants below. This fixes a
+## real problem with fixed limits: a manual range that comfortably fits a
+## quiet wilderness site will clip a loud site's data, and a range wide
+## enough for the loud site wastes most of its vertical space on the
+## quiet site - there's no single fixed range that fits well across
+## sites/parks with very different sound levels.
 ##
 ## yMinHr/yMaxHr/yMinHz/yMaxHz are still used as the FALLBACK whenever
 ## plotAUTO_Y is FALSE, so manual control remains available if you want
 ## consistent axes across a specific set of comparable sites.
-plotAUTO_Y <- FALSE
+plotAUTO_Y <- TRUE
 
 ## Padding added beyond each plot's actual data min/max before rounding
 ## outward to the nearest multiple of 3 (matching the existing tick-mark
@@ -88,6 +87,110 @@ yMaxHr <- 70   # upper limit, hourly graphs (multiple of 3) - used only when plo
 yMinHr <- 5    # lower limit, hourly graphs (multiple of 3) - used only when plotAUTO_Y is FALSE
 yMaxHz <- 70   # upper limit, frequency graphs (multiple of 3) - used only when plotAUTO_Y is FALSE
 yMinHz <- -12  # lower limit, frequency graphs (multiple of 3) - used only when plotAUTO_Y is FALSE
+
+## -- Y-axis auto-scale SCOPE for hourly/frequency plots (DBAvHR/DBTvHR/
+## SPLvFREQ) -----------------------------------------------------------
+## Only relevant when plotAUTO_Y (above) is TRUE. Controls whether each
+## plot's auto-scaled range is computed from THAT PLOT's own data alone
+## ("per_site" - the original per-plot behavior), or from the single
+## largest/smallest values found across EVERY site and season currently
+## being processed in this run ("global" - the default below, per
+## reporting-group feedback). "global" means every DBAvHR/DBTvHR plot in
+## this run shares one y-axis range, and every SPLvFREQ plot shares a
+## separate shared range, so a reader flipping between sites' figures in
+## the same report sees them on a consistent scale rather than each plot
+## being independently zoomed to its own data.
+plotAUTO_Y_scope <- "global"   # "global" or "per_site"
+
+## -- Y-axis auto-scaling for the Top Noise Source / Top Two Noise
+## Sources percent-audibility bar charts --------------------------------
+## When FALSE, these charts keep the original fixed 0-110% y-axis for
+## every site regardless of how audible noise actually was there. When
+## TRUE, the y-axis is instead scaled to the single highest "Total human
+## audibility" value found across EVERY site in this run - there is no
+## "per_site" mode for this chart type (only on/off) since the reporting
+## group specifically wants every top1/top2 figure in a report to share
+## one consistent y-axis range rather than each being independently
+## zoomed.
+plotAUTO_Y_paud <- FALSE
+autoscale_pad_frac_paud <- 0.10   # headroom above the global max, as a fraction of that max
+
+## -- Color palette (applies to BOTH the Top Noise Source(s) bar charts
+## AND the All Sound Sources heat-strip chart) --------------------------
+## Pick one of the four palettes below by name. Each supplies a
+## "primary"/"secondary" hue pair: on the top1/top2 bar charts, primary
+## colors the top (or only) noise source and secondary colors the second
+## source; on the All Sound Sources heat-strip chart, rows are colored by
+## Noise (primary) vs. Natural (secondary) category. Switching this one
+## setting re-colors both chart types consistently. "Total human
+## audibility" / background bars always use the fixed neutral grey below,
+## regardless of palette.
+noise_color_palette <- "blue_amber"  # one of: "purple_coral", "blue_amber", "deep_purple_gold", "orange_red"
+
+color_palettes <- list(
+  purple_coral     = list(label = "Purple/Coral",     primary = "#7B68EE", secondary = "#F08080"),
+  blue_amber       = list(label = "Blue/Amber",       primary = "#316194", secondary = "#E8A33D"),
+  deep_purple_gold = list(label = "Deep Purple/Gold", primary = "#440154", secondary = "#FDE725"),
+  orange_red       = list(label = "Orange/Red",       primary = "#D9731E", secondary = "#C0392B")
+)
+total_bar_color <- "#8A8F98"  # "Total human audibility" / background bar color - fixed across all palettes
+
+get_active_palette <- function() {
+  pal <- color_palettes[[noise_color_palette]]
+  if (is.null(pal)) {
+    stop("Unknown noise_color_palette: '", noise_color_palette, "' - expected one of: ",
+         paste(names(color_palettes), collapse = ", "))
+  }
+  pal
+}
+
+## -- All Sound Sources heat-strip chart ---------------------------------
+## Controls whether each source's 24-hour heat-strip is colored by its
+## OWN min/max (TRUE - so a quiet source's hourly pattern is still
+## visible even though its values are tiny compared to a loud source),
+## or by a single RAW/shared scale across every source plotted in that
+## figure (FALSE - so color intensity is directly comparable in absolute
+## percent-audible terms across sources, at the cost of quiet sources'
+## hourly pattern being harder to see). A reviewer specifically flagged
+## that per-row normalization could be misread as if every row's color
+## scale meant the same %audibility - "raw" mode avoids that, at the
+## cost of visual contrast for quieter sources.
+heatstrip_normalize <- TRUE   # TRUE = normalize per-source (own min/max); FALSE = raw/shared scale across sources in that figure
+
+## Controls row ORDER in the "All Sound Sources" heat-strip chart:
+##   "audibility"              - (original behavior) every row sorted by
+##                                descending daily mean %audible, Noise
+##                                and Natural sources interleaved freely.
+##   "category_then_audibility" - rows are grouped by category first
+##                                (Noise group, then Natural group - same
+##                                primary/secondary order used elsewhere
+##                                in this script), and only sorted by
+##                                descending daily mean %audible WITHIN
+##                                each group. A thin divider line is drawn
+##                                between the two groups so the grouping
+##                                is visually obvious. Only takes effect
+##                                when the chart actually has category
+##                                information available (both current
+##                                call sites supply category_col =
+##                                "SourceCategory") - falls back to plain
+##                                "audibility" sorting with a warning if
+##                                requested without a usable category_col.
+heatstrip_sort_mode <- "category_then_audibility"  # "audibility" or "category_then_audibility"
+
+## -- All Sound Sources heat-strip chart sizing ---------------------------
+## Controls the overall vertical compactness of the chart. Per reviewer
+## feedback ("consider reducing the vertical aspect of the plot and/or
+## spacing between bars... keeping the percentages legible"), these
+## replace what were previously hardcoded constants
+## (image height = 220 + n*60 px, bar height = 68% of each row) - reduced
+## here for a visibly tighter default, while the bar's share of each
+## row's height was INCREASED slightly (68% -> 74%) so the %-value text
+## printed at the end of each bar stays comfortably legible even as rows
+## get shorter. Both are tunable if this default still isn't compact
+## enough, or turns out too cramped, for your actual row counts.
+heatstrip_base_height_px <- 170  # fixed vertical space for title/margins, regardless of row count (was baked in as 220)
+heatstrip_row_height_px  <- 46   # vertical space PER SOURCE ROW, in pixels (was baked in as 60)
+heatstrip_bar_height_frac <- 0.74  # fraction of each row's height used by the bar/heat-strip cells (was baked in as 0.68)
 
 tabfix_scope <- "day_night"  # "any" or "day_night" - see fix_missing_tabs_in_lines()
 
@@ -274,6 +377,36 @@ safe_ggsave <- function(path, plot, ...) {
   )
 }
 
+## Opens a base-graphics png() device with a few retries and a short pause
+## between attempts, instead of failing immediately on the first error.
+## Added after encountering "unable to start png() device" / "unable to
+## open file ... for writing" errors that trace back to the OS
+## TRANSIENTLY locking the target file right as R tries to write it (most
+## commonly: the folder is synced by OneDrive/Dropbox/etc, or the
+## previous PNG at that same path is still open in an image viewer or
+## Explorer's preview pane) - NOT a bug in the plotting code itself.
+## Writing many small PNGs in quick succession (as this script's
+## draw_heatstrip_chart() and base-graphics plotting blocks do) is
+## exactly the pattern that tends to trigger this. Returns TRUE if the
+## device opened successfully (the caller can then draw into it
+## normally), or FALSE if it never opened after max_tries attempts - the
+## caller is expected to check this and skip that one figure gracefully
+## rather than letting the error propagate and abort the whole run.
+safe_open_png_device <- function(path, width, height, res, max_tries = 3, wait_sec = 0.5) {
+  for (attempt in seq_len(max_tries)) {
+    ok <- tryCatch({
+      grDevices::png(filename = path, width = width, height = height, res = res)
+      TRUE
+    }, error = function(e) FALSE)
+    if (ok) return(TRUE)
+    if (attempt < max_tries) {
+      message("  PNG device busy/locked for: ", path, " - retrying (attempt ", attempt + 1, " of ", max_tries, ")...")
+      Sys.sleep(wait_sec)
+    }
+  }
+  FALSE
+}
+
 open_file_default_app <- function(path) {
   tryCatch({
     if (.Platform$OS.type == "windows") {
@@ -306,6 +439,453 @@ extract_days_count <- function(fileName, label, season) {
   m <- regmatches(hit[1], regexpr("\\(n\\s*=\\s*\\d+\\s*days?\\)", hit[1]))
   if (length(m) == 0) return(NA_integer_)
   as.integer(gsub("[^0-9]", "", m))
+}
+
+## ---------------------------------------------------------------------
+## 3c-pre. HELPERS: global y-axis auto-scaling (percent-audibility charts
+##         and SPL hourly/frequency charts)
+## ---------------------------------------------------------------------
+
+## Computes a [0, yMax] y-axis range for the top1/top2 percent-audibility
+## bar charts from a single GLOBAL maximum value (see plotAUTO_Y_paud
+## above) - simpler than compute_auto_ylim() above since this is a
+## percentage that can never go below 0, so only the upper bound needs
+## computing. Pads by autoscale_pad_frac_paud and rounds up to a clean
+## multiple of 5 (matching this chart's original 10-unit label
+## convention) rather than compute_auto_ylim()'s multiple-of-3 rounding,
+## which was tailored to dB values instead.
+compute_auto_ylim_paud <- function(global_max, pad_frac = autoscale_pad_frac_paud) {
+  if (!is.finite(global_max) || global_max <= 0) global_max <- 10
+  padded <- global_max * (1 + pad_frac)
+  yMax <- ceiling(padded / 5) * 5
+  c(0, yMax)
+}
+
+## Chooses a "nice" break interval for the percent-audibility y-axis
+## given its (possibly auto-scaled) upper bound, so labels stay
+## reasonably spaced regardless of whether the chart is zoomed way in
+## (small yMax) or using the original fixed 0-110 range.
+paud_breaks <- function(yMax) {
+  step <- if (yMax >= 50) 10 else if (yMax >= 20) 5 else if (yMax >= 10) 2 else 1
+  seq(0, yMax, by = step)
+}
+
+## Scans every selected metrics file for the "pAud" (total human
+## audibility - i.e. the grey background bar on the top1/top2 charts)
+## section of every season it contains, and returns the single highest
+## value found across all of them - the "global max audibility" used to
+## scale every top1/top2 chart in this run when plotAUTO_Y_paud is TRUE.
+## This intentionally does NOT replicate the full pAud/catcombined/
+## toptwosource pipeline used in the main loop (which also needs
+## source-level breakdowns) - it only needs the raw Total column's max,
+## which readMetrics()'s "pAud" result already provides directly.
+compute_global_paud_max <- function(file_info) {
+  vals <- numeric(0)
+  for (fi in file_info) {
+    for (s in fi$seasons) {
+      res <- tryCatch(readMetrics(fi$file, "pAud", s), error = function(e) NULL)
+      if (is.null(res)) next
+      d <- data.frame(res)
+      if ("data.Total" %in% names(d)) {
+        vals <- c(vals, suppressWarnings(as.numeric(d$data.Total)))
+      }
+    }
+  }
+  vals <- vals[is.finite(vals)]
+  if (length(vals) == 0) return(NA_real_)
+  max(vals, na.rm = TRUE)
+}
+
+## Scans every file/season that will actually be plotted in the main loop
+## (i.e. every combo in run_combos) to find the single overall min/max for
+## each SPL plot TYPE (hourly dBA, hourly dBT, frequency content), so
+## every plot of that type in this run can share one consistent y-axis
+## range instead of each being scaled to its own data independently (see
+## plotAUTO_Y_scope above). This intentionally duplicates some of the
+## file-parsing logic used later in the main plotting loop (reading
+## mVersion, locating data sections, reading the small data tables) -
+## that duplication is accepted here deliberately, to avoid restructuring
+## the already-large, delicate main plotting loop just to share this
+## code; this pre-pass ONLY accumulates min/max values and never writes
+## any files or plots.
+compute_global_spl_ranges <- function(file_info, run_combos) {
+  dba_range  <- c(Inf, -Inf)
+  dbt_range  <- c(Inf, -Inf)
+  freq_range <- c(Inf, -Inf)
+  
+  update_range <- function(rng, lo, hi) {
+    if (is.finite(lo)) rng[1] <- min(rng[1], lo)
+    if (is.finite(hi)) rng[2] <- max(rng[2], hi)
+    rng
+  }
+  
+  for (r in seq_len(nrow(run_combos))) {
+    season <- run_combos$Season[r]
+    year   <- run_combos$Year[r]
+    combo_info <- Filter(function(fi) fi$year == year && season %in% fi$seasons, file_info)
+    
+    for (fi in combo_info) {
+      fileData <- scan(fi$file, what = "character", sep = "\n", blank.lines.skip = FALSE, quiet = TRUE)
+      mv_line <- fileData[grep("###", fileData)]
+      if (length(mv_line) == 0) next
+      mVersion <- as.numeric(strsplit(mv_line, "V")[[1]][2])
+      
+      ## -- Hourly dBA / dBT --
+      for (pType in 1:2) {
+        dataPos <- if (mVersion > 1.2) {
+          if (pType == 1) grep("Median Hourly Metrics \\(dBA\\)", fileData) else grep("Median Hourly Metrics \\(dBT\\)", fileData)
+        } else {
+          if (pType == 1) grep("Median dBA values by Hour", fileData) else grep("Median Truncated dBA values by Hour", fileData)
+        }
+        if (length(dataPos) == 0) next
+        for (sIdx in seq_along(dataPos)) {
+          gInfo <- scan(fi$file, skip = dataPos[sIdx] - 1, sep = "!", n = 1, what = "character")
+          seasonHere <- gsub(".*,\\s(\\w+)\\s.*", "\\1", gInfo)
+          if (seasonHere != season) next
+          data <- tryCatch({
+            if (mVersion > 1.2) {
+              t(read.table(fi$file, skip = dataPos[sIdx], nrows = 9, header = TRUE, row.names = 1,
+                           sep = "\t", na.strings = c("--.-","-888.0")))
+            } else {
+              read.table(fi$file, skip = dataPos[sIdx], nrows = 24, header = TRUE,
+                         sep = "\t", na.strings = c("--.-","-888.0"))
+            }
+          }, error = function(e) NULL)
+          if (is.null(data)) next
+          lo <- min(data[, "L090"], na.rm = TRUE)
+          if (sum(!is.na(data[, "Lnat"])) > 0) lo <- min(lo, min(data[, "Lnat"], na.rm = TRUE))
+          hi <- max(data[, "L010"], na.rm = TRUE)
+          if (pType == 1) dba_range <- update_range(dba_range, lo, hi) else dbt_range <- update_range(dbt_range, lo, hi)
+        }
+      }
+      
+      ## -- Frequency content (day + night combined) --
+      dataDayPosAll <- grep("Median Daytime Frequency Metrics \\(dB\\), ", fileData)
+      dataNightPosAll <- grep("Median Nighttime Frequency Metrics \\(dB\\), ", fileData)
+      dayString_pos <- dataDayPosAll[grepl(season, fileData[dataDayPosAll])]
+      nightString_pos <- dataNightPosAll[grepl(season, fileData[dataNightPosAll])]
+      hasDay <- length(dayString_pos) > 0
+      hasNight <- length(nightString_pos) > 0
+      if (!hasDay && !hasNight) next
+      
+      dataDay <- NULL; dataNight <- NULL
+      if (hasDay) {
+        dataDay <- tryCatch({
+          if (mVersion > 1.2) t(read.table(fi$file, skip = dayString_pos[1], nrows = 4, header = TRUE, row.names = 1, sep = "\t", na.strings = c("--.-","-888.0")))
+          else read.table(fi$file, skip = dayString_pos[1], nrows = 33, header = TRUE, sep = "\t", na.strings = c("--.-","-888.0"))
+        }, error = function(e) NULL)
+      }
+      if (hasNight) {
+        dataNight <- tryCatch({
+          if (mVersion > 1.2) t(read.table(fi$file, skip = nightString_pos[1], nrows = 4, header = TRUE, row.names = 1, sep = "\t", na.strings = c("--.-","-888.0")))
+          else read.table(fi$file, skip = nightString_pos[1], nrows = 33, header = TRUE, sep = "\t", na.strings = c("--.-","-888.0"))
+        }, error = function(e) NULL)
+      }
+      lo <- Inf; hi <- -Inf
+      if (!is.null(dataDay))   { lo <- min(lo, min(dataDay[,"L090"], na.rm = TRUE));   hi <- max(hi, max(dataDay[,"L010"], na.rm = TRUE)) }
+      if (!is.null(dataNight)) { lo <- min(lo, min(dataNight[,"L090"], na.rm = TRUE)); hi <- max(hi, max(dataNight[,"L010"], na.rm = TRUE)) }
+      freq_range <- update_range(freq_range, lo, hi)
+    }
+  }
+  
+  to_ylim <- function(rng) {
+    if (!is.finite(rng[1]) || !is.finite(rng[2])) return(NULL)
+    compute_auto_ylim(rng[1], rng[2])
+  }
+  
+  list(dba = to_ylim(dba_range), dbt = to_ylim(dbt_range), freq = to_ylim(freq_range))
+}
+
+## ---------------------------------------------------------------------
+## 3d. HELPER: "All Sound Sources" heat-strip chart
+## ---------------------------------------------------------------------
+## Replaces the previous faceted Noise/Natural bar-chart design for the
+## "PercentAud_description_all.png" / "PercentAud_category_all.png"
+## figures, per reporting-group feedback after the large 24-column
+## hourly detail tables were dropped from these reports (readers now
+## have no other hourly view of these sources at all). See
+## draw_heatstrip_chart()'s own doc comment below for the figure design.
+
+## The 24 hourly column names, IN 00h..23h ORDER, as written by the main
+## loop's readMetrics()-based extraction (LLDetail/LLCat/SPLATDet/
+## SPLATecs sections all use this exact naming, including the "hr"
+## (not "h") suffix on hours 06 and 07 specifically - a quirk of the
+## original column-naming code this script inherited, not something
+## introduced here). Reused wherever this script needs to select "all 24
+## hour columns, in order" from detcombined/catcombined by name rather
+## than by a fragile positional index.
+HOUR_COL_NAMES <- c("00h","01h","02h","03h","04h","05h","06hr","07hr","08h","09h",
+                    "10h","11h","12h","13h","14h","15h","16h","17h","18h","19h",
+                    "20h","21h","22h","23h")
+
+## Draws one "All Sound Sources" heat-strip chart for a single site: a
+## horizontal bar (length = that source's daily mean %audible, relative
+## to the loudest source/category shown in THIS figure) next to a 24-cell
+## heat-strip showing that same row's own hourly pattern, one row per
+## source/category, sorted by daily mean descending. No subtitle text is
+## drawn on the image itself - per reporting-group feedback, any
+## explanatory text belongs in the external figure caption, not baked
+## into the PNG.
+##
+##   df         - one row per source/category, ALREADY aggregated to this
+##                one site (e.g. via aggregate(..., FUN = mean) across any
+##                duplicate rows sharing the same label), containing:
+##                  - a label column (name given by label_col)
+##                  - the 24 hour columns named exactly per hour_cols
+##                  - a "dailymean" column (rowMeans of the hour columns)
+##   label_col  - name of the label column in df (e.g. "Source Description"
+##                or "Source Type")
+##   hour_cols  - HOUR_COL_NAMES (or equivalent), in 00h..23h order
+##   out_path   - PNG path to write
+##   title      - single-line plot title; NO subtitle is drawn
+##   pal        - one entry from color_palettes (primary/secondary - see
+##                category_col below)
+##   normalize  - TRUE: each row's heat-strip cells are colored using THAT
+##                ROW's OWN min/max, so a quiet source's hourly pattern is
+##                still visible even though its raw values are tiny
+##                compared to a loud source in the same figure. FALSE:
+##                every row in this ONE figure instead shares a single
+##                raw/absolute color scale, so color intensity is
+##                directly comparable in %-audible terms across rows - at
+##                the cost of a quiet source's own hourly shape being
+##                much harder to see. A reviewer specifically flagged
+##                that per-row normalization could be misread as implying
+##                every row's color scale means the same %audibility -
+##                "raw" mode avoids that specific misreading.
+##   category_col - optional column name in df (e.g. "SourceCategory")
+##                whose values are expected to be "Noise" or "Natural".
+##                When supplied, each row's bar + heat-strip cells are
+##                colored by that row's category (Noise = pal$primary,
+##                Natural = pal$secondary) instead of every row sharing
+##                one flat color, and a small legend is drawn near the
+##                top showing only the categories actually present in
+##                this figure's data.
+##   sort_mode  - "audibility" (default): every row sorted purely by
+##                descending daily mean %audible, Noise/Natural
+##                interleaved. "category_then_audibility": rows grouped
+##                by category (Noise group, then Natural group), sorted
+##                by descending daily mean WITHIN each group, with a thin
+##                divider line drawn between the two groups. Falls back
+##                to "audibility" (with a message) if requested without a
+##                usable category_col, since there's nothing to group by.
+draw_heatstrip_chart <- function(df, label_col, hour_cols, out_path, title, pal, normalize = TRUE,
+                                 category_col = NULL, sort_mode = "audibility") {
+  if (is.null(df) || nrow(df) == 0) {
+    message("  No data for heat-strip chart - skipping: ", basename(out_path))
+    return(invisible(NULL))
+  }
+  
+  has_legend <- !is.null(category_col) && category_col %in% names(df)
+  
+  if (sort_mode == "category_then_audibility" && !has_legend) {
+    message("  heatstrip_sort_mode is 'category_then_audibility' but no usable category_col was supplied for: ",
+            basename(out_path), " - falling back to 'audibility' sort for this figure.")
+    sort_mode <- "audibility"
+  }
+  
+  # Row ORDER: see sort_mode's doc comment above. "category_then_audibility"
+  # ranks Noise before Natural (matching the primary/secondary color
+  # convention used throughout this chart and the top1/top2 charts), then
+  # sorts by descending daily mean WITHIN each category group; any
+  # category value outside {Noise, Natural} sorts last. "audibility"
+  # (default) is the original single-key descending sort.
+  if (sort_mode == "category_then_audibility") {
+    cat_rank <- c(Noise = 1, Natural = 2)
+    df$.cat_rank <- ifelse(as.character(df[[category_col]]) %in% names(cat_rank),
+                           cat_rank[as.character(df[[category_col]])], 99)
+    df <- df[order(df$.cat_rank, -df$dailymean), , drop = FALSE]
+    df$.cat_rank <- NULL
+  } else {
+    df <- df[order(-df$dailymean), , drop = FALSE]
+  }
+  
+  n <- nrow(df)
+  labels <- as.character(df[[label_col]])
+  daily  <- df$dailymean
+  hour_mat <- as.matrix(df[, hour_cols, drop = FALSE])  # n x 24, 00h..23h order
+  max_daily <- max(daily, na.rm = TRUE)
+  if (!is.finite(max_daily) || max_daily <= 0) max_daily <- 1
+  
+  raw_lo <- suppressWarnings(min(hour_mat, na.rm = TRUE))
+  raw_hi <- suppressWarnings(max(hour_mat, na.rm = TRUE))
+  if (!is.finite(raw_lo)) raw_lo <- 0
+  if (!is.finite(raw_hi) || raw_hi <= raw_lo) raw_hi <- raw_lo + 1
+  
+  # Per reporting-group feedback: color each row by Noise vs. Natural
+  # category (using the SAME palette selected for the top1/top2 charts -
+  # primary = Noise, secondary = Natural) instead of every row sharing
+  # one flat color - WITHOUT faceting/paneling the two categories apart
+  # (the original design's facet split), just a color distinction plus a
+  # small legend. has_legend is only TRUE when the caller actually
+  # supplied a category_col that exists in df (both current call sites
+  # do, but this keeps the function usable without one too).
+  categories <- if (has_legend) as.character(df[[category_col]]) else rep(NA_character_, n)
+  cat_colors <- c(Noise = pal$primary, Natural = pal$secondary)
+  row_color <- function(cat) {
+    if (!is.na(cat) && cat %in% names(cat_colors)) cat_colors[[cat]] else pal$primary
+  }
+  
+  # DIVIDER between category groups - only computed/used when sort_mode
+  # actually grouped rows by category. divider_after[i] is TRUE if a
+  # divider line should be drawn immediately below row i (i.e. row i+1
+  # belongs to a different category than row i). divider_gap is the
+  # EXTRA vertical space (as a fraction of ONE row's height, see row_h
+  # below) reserved at each such boundary, on top of the normal per-row
+  # spacing - this is what visually separates the groups rather than
+  # just relying on the divider line alone.
+  use_divider <- sort_mode == "category_then_audibility" && has_legend && n > 1
+  divider_after <- logical(n)
+  if (use_divider) {
+    for (i in seq_len(n - 1)) {
+      divider_after[i] <- !is.na(categories[i]) && !is.na(categories[i + 1]) && categories[i] != categories[i + 1]
+    }
+  }
+  n_dividers <- sum(divider_after)
+  divider_gap_frac <- 0.4  # extra space at each boundary, as a fraction of one row's height
+  
+  img_height <- heatstrip_base_height_px + n * heatstrip_row_height_px
+  dir.create(dirname(out_path), recursive = TRUE, showWarnings = FALSE)
+  # See safe_open_png_device()'s doc comment (Section 3b) for why a plain
+  # png() call here could throw "unable to start png() device" / "unable
+  # to open file ... for writing" - a transient OS-level file lock (e.g.
+  # OneDrive sync, or the previous run's PNG still open in a viewer), not
+  # a bug in this drawing function. If the device still can't be opened
+  # after a few retries, this figure is skipped with a clear message
+  # instead of aborting the whole run.
+  opened <- safe_open_png_device(out_path, width = 1600, height = img_height, res = 150)
+  if (!opened) {
+    message("  Could not open PNG device for: ", out_path,
+            " after multiple attempts - skipping this figure. ",
+            "(Check whether the file is open in an image viewer, or whether this folder is mid-sync in OneDrive/Dropbox.)")
+    return(invisible(NULL))
+  }
+  on.exit({
+    tryCatch(grDevices::dev.off(), error = function(e) NULL)
+  }, add = TRUE)
+  
+  # Top margin is a little taller when a legend is drawn (has_legend), to
+  # leave room for the swatches below the title without crowding the
+  # first data row - a FIXED PIXEL height either way, converted to a
+  # plot-area fraction, so the title/axis-label zones stay a constant
+  # absolute size regardless of row count n.
+  top_margin_px    <- if (has_legend) 78 else 55
+  bottom_margin_px <- 80  # baseline + hour labels + "Time of day" title
+  top_margin    <- top_margin_px / img_height
+  bottom_margin <- bottom_margin_px / img_height
+  plot_h        <- 1 - top_margin - bottom_margin
+  
+  # Bar zone and heat-strip zone separated by an explicit gap (gap_w),
+  # taken out of the bar zone's own width so label+bar+gap+strip still
+  # sums to 1.
+  label_w <- 0.22
+  gap_w   <- 0.045
+  bar_w   <- 0.26 - gap_w
+  strip_x0 <- label_w + bar_w + gap_w
+  strip_w  <- 1 - strip_x0
+  
+  # row_h shrinks slightly when dividers are present, so the TOTAL space
+  # used by (n rows x row_h) + (n_dividers x divider gap) still exactly
+  # fills plot_h - i.e. adding dividers never changes the chart's overall
+  # height, it just redistributes that same vertical space between rows
+  # and boundary gaps.
+  row_h <- plot_h / (n + n_dividers * divider_gap_frac)
+  
+  par(mar = c(0.2, 0.2, 2.3, 0.2))
+  plot(NA, xlim = c(0, 1), ylim = c(0, 1), xaxt = "n", yaxt = "n", xlab = "", ylab = "",
+       bty = "n", main = title, cex.main = 1.15)
+  
+  # Legend (Noise / Natural swatches), drawn once near the top, only for
+  # whichever categories actually appear in THIS figure's data (so a
+  # site with no natural sounds detected doesn't show a misleading
+  # "Natural" swatch with nothing behind it).
+  if (has_legend) {
+    present <- intersect(names(cat_colors), unique(categories))
+    if (length(present) > 0) {
+      leg_y <- 1 - (top_margin_px * 0.62) / img_height
+      sw <- 0.018
+      x0 <- 0.60
+      for (j in seq_along(present)) {
+        xj <- x0 + (j - 1) * 0.16
+        rect(xj, leg_y - sw / 2, xj + sw, leg_y + sw / 2, col = cat_colors[[present[j]]], border = NA)
+        text(xj + sw + 0.008, leg_y, present[j], adj = c(0, 0.5), cex = 0.78, xpd = NA)
+      }
+    }
+  }
+  
+  # Precompute each row's y_top, accounting for cumulative extra divider
+  # gaps above it (a row after one or more boundaries sits further down
+  # than a flat "row_h * (i-1)" offset would place it).
+  extra_gap_before <- c(0, divider_after[-n]) * divider_gap_frac * row_h  # gap inserted ABOVE row i, for i>1
+  cum_extra <- cumsum(extra_gap_before)
+  
+  for (i in seq_len(n)) {
+    y_top <- (1 - top_margin) - (i - 1) * row_h - cum_extra[i]
+    y_bot <- y_top - row_h * heatstrip_bar_height_frac
+    y_mid <- (y_top + y_bot) / 2
+    
+    this_color <- row_color(categories[i])
+    pal_rgb_i <- grDevices::col2rgb(this_color) / 255
+    
+    text(label_w - 0.01, y_mid, labels[i], adj = c(1, 0.5), cex = 0.85, xpd = NA)
+    
+    bar_frac <- if (is.finite(daily[i])) daily[i] / max_daily else 0
+    rect(label_w, y_bot, label_w + bar_w * bar_frac, y_top, col = this_color, border = NA)
+    text(label_w + bar_w * bar_frac + 0.006, y_mid, sprintf("%.1f%%", daily[i]),
+         adj = c(0, 0.5), cex = 0.78, xpd = NA)
+    
+    if (normalize) {
+      row_lo <- suppressWarnings(min(hour_mat[i, ], na.rm = TRUE))
+      row_hi <- suppressWarnings(max(hour_mat[i, ], na.rm = TRUE))
+      if (!is.finite(row_lo)) row_lo <- 0
+      if (!is.finite(row_hi) || row_hi <= row_lo) row_hi <- row_lo + 1
+    } else {
+      row_lo <- raw_lo
+      row_hi <- raw_hi
+    }
+    cell_w <- strip_w / 24
+    for (h in 0:23) {
+      v <- hour_mat[i, h + 1]
+      intensity <- if (is.na(v)) 0 else max(0, min(1, (v - row_lo) / (row_hi - row_lo)))
+      cell_col <- grDevices::rgb(pal_rgb_i[1], pal_rgb_i[2], pal_rgb_i[3], alpha = 0.12 + intensity * 0.88)
+      x0 <- strip_x0 + h * cell_w
+      rect(x0, y_bot, x0 + cell_w, y_top, col = cell_col, border = NA)
+    }
+    
+    # Thin divider line in the gap below this row, only when this row is
+    # the last one in its category group (see divider_after/use_divider
+    # above) - spans the full chart width (label column through the end
+    # of the heat-strip) so the group break reads clearly at a glance.
+    if (use_divider && divider_after[i]) {
+      divider_y <- y_bot - (row_h * divider_gap_frac) / 2
+      segments(0, divider_y, 1, divider_y, col = "grey70", lwd = 1, xpd = NA)
+    }
+  }
+  
+  # Simple x/y axis lines delineating each panel - a vertical line at the
+  # left edge of the bar panel, a second at the left edge of the
+  # heat-strip panel, and one shared horizontal baseline beneath both,
+  # drawn at the bottom-most row's own bottom edge rather than y = 0, so
+  # it sits directly under the data instead of floating in the label
+  # margin below it.
+  axis_y <- (1 - top_margin) - plot_h
+  segments(label_w, 1 - top_margin, label_w, axis_y, col = "black", lwd = 1)          # bar panel y-axis
+  segments(strip_x0, 1 - top_margin, strip_x0, axis_y, col = "black", lwd = 1)        # heat-strip panel y-axis
+  segments(label_w, axis_y, 1, axis_y, col = "black", lwd = 1)                        # shared x-axis baseline
+  
+  # Hour-of-day tick marks + labels, anchored to the bottom margin (fixed
+  # pixel height) so they sit at the very bottom of the image regardless
+  # of row count.
+  tick_len <- bottom_margin * 0.28
+  label_y  <- axis_y - bottom_margin * 0.40
+  for (h in c(0, 6, 12, 18, 23)) {
+    x0 <- strip_x0 + (h + 0.5) * (strip_w / 24)
+    segments(x0, axis_y, x0, axis_y - tick_len, col = "black", lwd = 1)
+    text(x0, label_y, h, cex = 0.68, xpd = NA)
+  }
+  # X-axis title, centered under the heat-strip panel only
+  title_y <- axis_y - (bottom_margin_px - 12) / img_height
+  text(strip_x0 + strip_w / 2, title_y, "Time of day", cex = 0.85, xpd = NA)
+  invisible(NULL)
 }
 
 ## ---------------------------------------------------------------------
@@ -379,13 +959,21 @@ get_png_caption <- function(filename, pcode, parkname, season, year) {
   fn <- basename(filename)
   site <- sub("_.*", "", fn)
   if (grepl("PercentAud_description_all", fn))
-    return(sprintf("%s: percent of time each individual sound source was audible, grouped by category (noise/natural), in %s %s.", site, season, year))
+    return(sprintf(
+      "%s: daily mean percent time audible for each individual sound source (bar), with that source's hourly pattern shown as a 24-hour intensity strip, in %s %s.",
+      site, season, year))
   if (grepl("PercentAud_category_all", fn))
-    return(sprintf("%s: percent of time audible by sound source category (noise/natural), in %s %s.", site, season, year))
+    return(sprintf(
+      "%s: daily mean percent time audible by sound source type (bar), with each source type's hourly pattern shown as a 24-hour intensity strip, in %s %s.",
+      site, season, year))
   if (grepl("PercentAud_top1", fn))
-    return(sprintf("%s: hourly percent time audible for total human-caused sound compared to the single top noise source, in %s %s.", site, season, year))
+    return(sprintf(
+      "%s: hourly percent time audible for total human-caused sound (background bar) and the single top noise source (overlaid bar), in %s %s.",
+      site, season, year))
   if (grepl("PercentAud_top2", fn))
-    return(sprintf("%s: hourly percent time audible for total human-caused sound compared to the top two noise sources, in %s %s.", site, season, year))
+    return(sprintf(
+      "%s: hourly percent time audible for total human-caused sound (background bar) and the top two noise sources, shown side by side within the total, in %s %s.",
+      site, season, year))
   if (grepl("_SPLvFREQ", fn))
     return(sprintf(
       "Day and night percentile sound pressure levels for 33 one-third octave bands at %s in %s, %s. The bold portion of each bar indicates the range between existing (L50) and natural (Lnat) sound pressure levels; grayed areas fall outside the typical range of human hearing.",
@@ -400,6 +988,36 @@ get_png_caption <- function(filename, pcode, parkname, season, year) {
     return(sprintf("%s: median and mean duration of noise-free intervals by hour of day, in %s %s.", site, season, year))
   if (grepl("_CONTOUR", fn))
     return(sprintf("%s: sound level contour plot (hour of day vs. frequency, colored by sound pressure level in dB), %s %s.", site, season, year))
+  paste0("Figure: ", gsub("[_.]+", " ", tools::file_path_sans_ext(fn)))
+}
+
+## Longer, more descriptive accessibility-style text per figure type -
+## intended to mirror the level of detail Step4's Rmd uses for its own
+## "sr Alternate text" blocks (which Step1 does not currently embed
+## anywhere itself, since Step1 produces PNGs and a PDF rather than a
+## Word document with alt-text fields). Provided here so this text is
+## ready to reuse if/when Step1's outputs are consumed by something that
+## can make use of it (e.g. copied into Step4's own alt-text blocks for
+## these same figure types), rather than needing to be written from
+## scratch a second time. NOT currently called anywhere else in this
+## script - see note above.
+get_png_alttext <- function(filename, pcode, parkname, season, year) {
+  fn <- basename(filename)
+  site <- sub("_.*", "", fn)
+  if (grepl("PercentAud_description_all", fn) || grepl("PercentAud_category_all", fn)) {
+    level <- if (grepl("category_all", fn)) "sound source type" else "individual sound source"
+    return(sprintf(
+      "A horizontal chart listing each %s at %s, sorted from most to least audible. To the right of each label, a solid bar shows that source's overall daily mean percent time audible, with the percentage printed at the end of the bar. Further right, a row of 24 colored cells (one per hour, midnight through 11pm) shows how audible that source was at each hour of the day - darker or more saturated cells indicate hours when the source was more audible.",
+      level, site))
+  }
+  if (grepl("PercentAud_top1", fn)) {
+    return(sprintf(
+      "A bar chart with hour of day (00-23) on the horizontal axis and percent time audible on the vertical axis. A grey background bar at each hour shows the total percent time any human-caused sound was audible; a colored bar on top of it, the same width, shows the percent time the single most common noise source was audible that hour."))
+  }
+  if (grepl("PercentAud_top2", fn)) {
+    return(sprintf(
+      "A bar chart with hour of day (00-23) on the horizontal axis and percent time audible on the vertical axis. A grey background bar at each hour shows the total percent time any human-caused sound was audible. Two narrower colored bars are placed side by side within that same hour, one for each of the two most common noise sources, so their relative audibility can be compared directly."))
+  }
   paste0("Figure: ", gsub("[_.]+", " ", tools::file_path_sans_ext(fn)))
 }
 
@@ -1358,6 +1976,35 @@ if (build_sitemeta) {
 }
 
 ## ---------------------------------------------------------------------
+## 9c. GLOBAL Y-AXIS AUTO-SCALE PRE-PASS
+##     Only runs the relevant scan if the corresponding toggle is enabled.
+##     See plotAUTO_Y_scope / plotAUTO_Y_paud (Section 0) and the helper
+##     functions compute_global_spl_ranges() / compute_global_paud_max()
+##     (Section 3c-pre) for what each of these actually computes and why.
+## ---------------------------------------------------------------------
+
+global_spl_ylims <- NULL
+if (plotAUTO_Y && plotAUTO_Y_scope == "global") {
+  message("\n=== Pre-scanning all selected files to compute GLOBAL y-axis ranges (hourly dBA/dBT, frequency content) ===")
+  global_spl_ylims <- compute_global_spl_ranges(file_info, run_combos)
+  if (!is.null(global_spl_ylims$dba))  message(sprintf("    Hourly dBA  global range -> y-axis %s to %s", global_spl_ylims$dba[1],  global_spl_ylims$dba[2]))
+  if (!is.null(global_spl_ylims$dbt))  message(sprintf("    Hourly dBT  global range -> y-axis %s to %s", global_spl_ylims$dbt[1],  global_spl_ylims$dbt[2]))
+  if (!is.null(global_spl_ylims$freq)) message(sprintf("    Frequency content global range -> y-axis %s to %s", global_spl_ylims$freq[1], global_spl_ylims$freq[2]))
+}
+
+global_paud_ylim <- NULL
+if (plotAUTO_Y_paud) {
+  message("=== Pre-scanning all selected files to compute GLOBAL max audibility for Top Noise Source chart(s) ===")
+  global_paud_max <- compute_global_paud_max(file_info)
+  global_paud_ylim <- compute_auto_ylim_paud(global_paud_max)
+  if (is.finite(global_paud_max)) {
+    message(sprintf("    Global max audibility found: %.1f%% -> y-axis will use 0-%.0f%%", global_paud_max, global_paud_ylim[2]))
+  } else {
+    message("    Could not determine a global max audibility from the selected files - falling back to fixed 0-110% scale.")
+  }
+}
+
+## ---------------------------------------------------------------------
 ## 10. MAIN LOOP: one pass per Season+Year combo
 ## ---------------------------------------------------------------------
 
@@ -1745,6 +2392,46 @@ for (r in seq_len(nrow(run_combos))) {
   }
   
   ## -- Noise source bar plots (top1 / top2) -------------------------------
+  ## REDESIGNED per reporting-group feedback (heavy grey/white grid
+  ## background flagged as visually "noisy" / moire-prone):
+  ##  - Background: axis lines only (black, moderate weight) plus sparse
+  ##    dashed horizontal reference lines at every THIRD labeled tick
+  ##    (e.g. 0/30/60/90 on the original 0-100-by-10 label scale) rather
+  ##    than a dense grid - reference lines are drawn BEHIND the bars via
+  ##    geom_hline() added as the first layer, so bars are never obscured.
+  ##  - Layout: Aircraft/People are now drawn SIDE BY SIDE (dodged, not
+  ##    stacked or overlaid-with-alpha) WITHIN the Total bar's own
+  ##    footprint (same x position, same width) - i.e. "sources side by
+  ##    side within total" per reporting-group consensus. The grey Total
+  ##    bar is drawn first (full width) so any exposed grey above the
+  ##    dodged source bars represents other/unlabeled noise sources.
+  ##  - Colors: driven by get_active_palette() (Section 0) - the same
+  ##    palette selection also colors the All Sound Sources heat-strip
+  ##    chart, so one setting re-colors both chart types consistently.
+  ##  - Legend order: standardized via `breaks=` to always read Top1 (then
+  ##    Top2, if present) then "Total human audibility" - left to
+  ##    ggplot's default behavior, the legend would otherwise sort
+  ##    alphabetically by whatever that site's actual source NAMES happen
+  ##    to be, which varies site to site.
+  ##  - FIXED: mansrc1_lookup[i]/mansrc2_lookup[i] are NAMED character
+  ##    scalars (built via setNames(SourceType, SiteID) a few lines
+  ##    below, then indexed by site) - each element carries its SITE ID
+  ##    as a name attribute. scale_fill_manual()'s `values=` convention
+  ##    treats vector NAMES as the data levels, so passing these values
+  ##    RAW (with the site-ID name still attached) into aes() and into
+  ##    `breaks=` let that site ID leak through as the displayed
+  ##    legend/fill label instead of the actual source description -
+  ##    every raw usage below is wrapped in unname() to strip that
+  ##    attribute, so only the source description string itself is ever
+  ##    used as a label. (The setNames(c(total_bar_color, ...), c(...))
+  ##    construction for `values=` itself was already safe without this,
+  ##    since setNames() uses the VALUES of its second argument as the
+  ##    new names - but unname() is applied there too now for clarity and
+  ##    consistency.)
+  ##  - Y-axis: fixed 0-110% by default (unchanged from before), or a
+  ##    GLOBAL (not per-site) auto-scaled range when plotAUTO_Y_paud is
+  ##    TRUE - see global_paud_ylim (Section 9c). Axis labels keep the
+  ##    original every-10-unit convention via paud_breaks().
   if (eitherfiles && !is.null(catcombined) && !is.null(pAudtranspose)) {
     srctypefinalplot <- catcombined[, c(2:27)]
     names(pAudtranspose) <- names(srctypefinalplot)
@@ -1770,10 +2457,21 @@ for (r in seq_len(nrow(run_combos))) {
     # the alignment regardless of which sites are missing, and lets the
     # loop check "does this site actually have a noise source" directly
     # instead of relying on position.
+    #
+    # NOTE: mansrc1_by_site/mansrc2_by_site are NAMED vectors
+    # (name = SiteID, value = SourceType) - see the unname() fix note
+    # above the "if (eitherfiles..." line for why every RAW usage of
+    # mansrc1_lookup[i]/mansrc2_lookup[i] below must be wrapped in
+    # unname() before being used as a plot label.
     mansrc1_by_site <- setNames(as.character(firstnoise$SourceType), firstnoise$SiteID)
     mansrc2_by_site <- setNames(as.character(secondnoise$SourceType), secondnoise$SiteID)
     mansrc1_lookup <- mansrc1_by_site[names_]
     mansrc2_lookup <- mansrc2_by_site[names_]
+    
+    pal <- get_active_palette()
+    yMaxPaud <- if (plotAUTO_Y_paud && !is.null(global_paud_ylim)) global_paud_ylim[2] else 110
+    breaks_paud <- paud_breaks(yMaxPaud)
+    ref_lines_paud <- breaks_paud[seq(1, length(breaks_paud), by = 3)]
     
     for (i in seq_along(names_)) {
       # FIXED: skip plot generation entirely for a site with no detected
@@ -1788,36 +2486,52 @@ for (r in seq_len(nrow(run_combos))) {
       
       df1 <- toptwosource1 %>% filter(SiteID %in% names_[i], `Source Type` %in% "Total Noise")
       df2 <- toptwosource1 %>% filter(SiteID %in% names_[i], `Source Type` %in% mansrc1_lookup[i])
+      
       p <- ggplot() +
-        geom_col(data = df1, aes(x = hr, y = paud, fill = `Source Type`, color = "Total human audibility"),
-                 fill = "grey55", width = .9, size = 0) +
-        geom_col(data = df2, aes(x = hr, y = paud, fill = `Source Type`), width = .85, alpha = .75, size = 0) +
+        geom_hline(yintercept = ref_lines_paud, linetype = "dashed", color = "grey65", linewidth = 0.3) +
+        geom_col(data = df1, aes(x = hr, y = paud, fill = "Total human audibility"), width = .9) +
+        geom_col(data = df2, aes(x = hr, y = paud, fill = unname(mansrc1_lookup[i])), width = .9) +
         ggtitle(if (plottitle) paste0("Top Noise Source at: ", names_[i]) else "") +
-        scale_fill_manual(values = c("slateblue")) +
+        # Legend order forced via `breaks` (Top1 then Total) - see
+        # unname() fix note above the eitherfiles block for why raw
+        # mansrc1_lookup[i] usages are wrapped in unname() throughout.
+        scale_fill_manual(values = setNames(c(total_bar_color, pal$primary),
+                                            c("Total human audibility", unname(mansrc1_lookup[i]))),
+                          breaks = c(unname(mansrc1_lookup[i]), "Total human audibility")) +
         scale_x_discrete("Hour") +
-        scale_y_continuous("Time Audible (%)", expand = c(0,0), limits = c(0,110), breaks = seq(0,100,10)) +
-        scale_color_manual(values = c("lightgrey","slateblue")) +
+        scale_y_continuous("Time Audible (%)", breaks = breaks_paud, limits = c(0, yMaxPaud), expand = c(0, 0)) +
+        theme_classic(base_size = 11) +
         theme(legend.position = "top", legend.title = element_blank(),
-              panel.background = element_rect(fill = "grey80", colour = "grey80", linewidth = 0.5),
-              panel.grid.minor = element_blank())
+              axis.line = element_line(colour = "black", linewidth = 0.5),
+              panel.grid = element_blank())
       safe_ggsave(file.path(outDir, paste0(names_[i], "_", season, "_", mansrc1_lookup[i], "_",
                                            mansrc2_lookup[i], "PercentAud_top1.png")),
                   plot = p, height = 5, width = 8)
       
       df2b <- toptwosource1 %>% filter(SiteID %in% names_[i], `Source Type` %in% c(mansrc1_lookup[i], mansrc2_lookup[i]))
+      # Role drives DODGE ORDER (always Primary=mansrc1 on the left, Secondary=mansrc2 on the
+      # right) independent of ggplot's default alphabetical grouping of `Source Type`; the
+      # fill aesthetic still maps to the real Source Type name so the legend shows actual
+      # source names rather than generic "Primary"/"Secondary" labels.
+      df2b$Role <- factor(ifelse(df2b$`Source Type` == mansrc1_lookup[i], "Primary", "Secondary"),
+                          levels = c("Primary", "Secondary"))
       p2 <- ggplot() +
-        geom_col(data = df1, aes(x = hr, y = paud, fill = `Source Type`, color = "Total human audibility"),
-                 fill = "grey55", width = .9, size = 0) +
-        geom_col(data = df2b, aes(x = hr, y = paud, fill = `Source Type`), position = "dodge2",
-                 width = .85, alpha = .80, size = 0) +
-        scale_fill_manual(values = c("slateblue","lightcoral")) +
+        geom_hline(yintercept = ref_lines_paud, linetype = "dashed", color = "grey65", linewidth = 0.3) +
+        geom_col(data = df1, aes(x = hr, y = paud, fill = "Total human audibility"), width = .9) +
+        geom_col(data = df2b, aes(x = hr, y = paud, fill = `Source Type`, group = Role),
+                 position = position_dodge2(width = .9, padding = 0), width = .9) +
+        # Legend order forced via `breaks` (Top1, Top2, then Total) - see
+        # unname() fix note above.
+        scale_fill_manual(values = setNames(c(total_bar_color, pal$primary, pal$secondary),
+                                            c("Total human audibility", unname(mansrc1_lookup[i]), unname(mansrc2_lookup[i]))),
+                          breaks = c(unname(mansrc1_lookup[i]), unname(mansrc2_lookup[i]), "Total human audibility")) +
         scale_x_discrete("Hour") +
-        scale_y_continuous("Time Audible (%)", expand = c(0,0), limits = c(0,110), breaks = seq(0,100,10)) +
-        scale_color_manual(values = c("lightgrey","slateblue","lightcoral")) +
+        scale_y_continuous("Time Audible (%)", breaks = breaks_paud, limits = c(0, yMaxPaud), expand = c(0, 0)) +
         ggtitle(if (plottitle) paste0("Top Two Noise Sources at: ", names_[i]) else "") +
+        theme_classic(base_size = 11) +
         theme(legend.position = "top", legend.title = element_blank(),
-              panel.background = element_rect(fill = "grey80", colour = "grey80", linewidth = 0.5),
-              panel.grid.minor = element_blank())
+              axis.line = element_line(colour = "black", linewidth = 0.5),
+              panel.grid = element_blank())
       safe_ggsave(file.path(outDir, paste0(names_[i], "_", season, "_", mansrc1_lookup[i], "_",
                                            mansrc2_lookup[i], "PercentAud_top2.png")),
                   plot = p2, height = 5, width = 8)
@@ -1825,68 +2539,68 @@ for (r in seq_len(nrow(run_combos))) {
   }
   
   ## -- All-source detail & category plots ---------------------------------
+  ## REDESIGNED per reporting-group feedback - see draw_heatstrip_chart()
+  ## (Section 3d) for the figure design. "Detail" (description_all) and
+  ## "category" (category_all) charts use the same heat-strip drawing
+  ## function; they differ only in which label column / source data feeds
+  ## it (Source Description from detcombined vs. Source Type from
+  ## catcombined - "category_all" is named for being grouped at the
+  ## Source Type level, not for being collapsed down to just Noise vs.
+  ## Natural, matching the original chart's actual granularity).
   if (eitherfiles && (!is.null(detailfinal) || !is.null(splatdetailfinal))) {
     detcombined <- rbind(if (!is.null(detailfinal)) detailfinal, if (!is.null(splatdetailfinal)) splatdetailfinal)
     detcombined <- merge(detcombined, sourceid, by = "Source Description")
-    detcombined$dailyave <- rowMeans(detcombined[, 3:26], na.rm = TRUE)
     detcombined$SiteID <- as.factor(detcombined$SiteID)
     detcombined$SourceCategory <- ifelse(detcombined$SrcID > 0 & detcombined$SrcID <= 20, "Noise",
                                          ifelse(detcombined$SrcID > 20 & detcombined$SrcID <= 40, "Natural", "Other"))
-    data_detail_all <- detcombined %>%
-      group_by(SiteID, SourceCategory, `Source Description`) %>%
-      summarize(mean = mean(dailyave, na.rm = TRUE), .groups = "drop")
     
-    cols <- RColorBrewer::brewer.pal(n = 2, name = "Set2")
-    
+    pal_hs <- get_active_palette()
     for (i in seq_along(names_)) {
-      df1 <- data_detail_all %>% filter(SiteID == names_[i], SourceCategory != "Other")
-      if (nrow(df1) == 0) next
-      num_categories <- length(unique(df1$SourceCategory))
-      df1_means <- df1 %>% group_by(`Source Description`) %>%
-        summarise(mean_value = mean(mean, na.rm = TRUE)) %>% arrange(mean_value)
-      df1$`Source Description` <- factor(df1$`Source Description`, levels = df1_means$`Source Description`)
-      df1$SourceCategory <- factor(df1$SourceCategory, levels = rev(unique(df1$SourceCategory)))
-      
-      p <- ggplot(df1, aes(x = mean, y = `Source Description`, fill = SourceCategory)) +
-        geom_col(width = 0.9) +
-        scale_x_continuous(name = "Time Audible (%)") +
-        scale_y_discrete(name = "Sound Source Description") +
-        facet_wrap(~ SourceCategory, scales = "free") +
-        theme_classic(base_size = 10) +
-        scale_fill_manual(values = cols[1:num_categories]) +
-        guides(fill = guide_legend(title = "Source Type")) +
-        ggtitle(if (plottitle) paste0("All Sound Sources at: ", names_[i]) else "") +
-        theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
-              legend.key.size = unit(0.5, "cm"), legend.position = "bottom")
-      safe_ggsave(file.path(outDir, paste0(names_[i], "_", season, "_PercentAud_description_all.png")),
-                  plot = p, height = 5, width = 8)
+      site_rows <- detcombined[detcombined$SiteID == names_[i] & detcombined$SourceCategory != "Other", , drop = FALSE]
+      if (nrow(site_rows) == 0) next
+      # Aggregate (mean) across any duplicate rows sharing the same
+      # Source Description for this site (e.g. if both Listening Center
+      # and SPLAT independently reported the same source) - matches the
+      # aggregation semantics the previous bar-chart design already used.
+      # SourceCategory is grouped alongside Source Description (it's
+      # constant per source, so this doesn't change the numeric
+      # aggregation) purely so it survives into agg_hours for
+      # category_col below.
+      agg_hours <- aggregate(site_rows[, HOUR_COL_NAMES],
+                             by = list(`Source Description` = site_rows$`Source Description`,
+                                       SourceCategory = site_rows$SourceCategory),
+                             FUN = mean, na.rm = TRUE)
+      agg_hours$dailymean <- rowMeans(agg_hours[, HOUR_COL_NAMES], na.rm = TRUE)
+      draw_heatstrip_chart(
+        df = agg_hours, label_col = "Source Description", hour_cols = HOUR_COL_NAMES,
+        out_path = file.path(outDir, paste0(names_[i], "_", season, "_PercentAud_description_all.png")),
+        title = paste0("All Sound Sources at: ", names_[i]),
+        pal = pal_hs, normalize = heatstrip_normalize, category_col = "SourceCategory",
+        sort_mode = heatstrip_sort_mode
+      )
     }
   }
   
-  if (eitherfiles && !is.null(data_pa_all)) {
-    cols <- RColorBrewer::brewer.pal(n = 2, name = "Set2")
+  if (eitherfiles && !is.null(catcombined)) {
+    pal_hs <- get_active_palette()
     for (i in seq_along(names_)) {
-      df1 <- data_pa_all %>% filter(SiteID == names_[i], SourceCategory != "Other")
-      if (nrow(df1) == 0) next
-      num_categories <- length(unique(df1$SourceCategory))
-      df1_means <- df1 %>% group_by(`Source Type`) %>%
-        summarise(mean_value = mean(mean, na.rm = TRUE)) %>% arrange(mean_value)
-      df1$`Source Type` <- factor(df1$`Source Type`, levels = df1_means$`Source Type`)
-      df1$SourceCategory <- factor(df1$SourceCategory, levels = rev(unique(df1$SourceCategory)))
-      
-      p <- ggplot(df1, aes(x = mean, y = `Source Type`, fill = SourceCategory)) +
-        geom_col(width = 0.9) +
-        scale_x_continuous(name = "Time Audible (%)") +
-        scale_y_discrete(name = "Sound Source Type") +
-        facet_wrap(~ SourceCategory, scales = "free") +
-        theme_classic(base_size = 10) +
-        scale_fill_manual(values = cols[1:num_categories]) +
-        guides(fill = guide_legend(title = "Source Type")) +
-        ggtitle(if (plottitle) paste0("All Sound Sources at: ", names_[i]) else "") +
-        theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
-              legend.key.size = unit(0.5, "cm"), legend.position = "bottom")
-      safe_ggsave(file.path(outDir, paste0(names_[i], "_", season, "_PercentAud_category_all.png")),
-                  plot = p, height = 5, width = 8)
+      site_rows <- catcombined[catcombined$SiteID == names_[i] & catcombined$SourceCategory != "Other", , drop = FALSE]
+      if (nrow(site_rows) == 0) next
+      # SourceCategory grouped alongside Source Type for the same reason
+      # as the description-level block above - constant per Source Type,
+      # just carried through so category_col below has it available.
+      agg_hours <- aggregate(site_rows[, HOUR_COL_NAMES],
+                             by = list(`Source Type` = site_rows$`Source Type`,
+                                       SourceCategory = site_rows$SourceCategory),
+                             FUN = mean, na.rm = TRUE)
+      agg_hours$dailymean <- rowMeans(agg_hours[, HOUR_COL_NAMES], na.rm = TRUE)
+      draw_heatstrip_chart(
+        df = agg_hours, label_col = "Source Type", hour_cols = HOUR_COL_NAMES,
+        out_path = file.path(outDir, paste0(names_[i], "_", season, "_PercentAud_category_all.png")),
+        title = paste0("All Sound Sources at: ", names_[i]),
+        pal = pal_hs, normalize = heatstrip_normalize, category_col = "SourceCategory",
+        sort_mode = heatstrip_sort_mode
+      )
     }
   }
   
@@ -1951,19 +2665,25 @@ for (r in seq_len(nrow(run_combos))) {
               if (hasLNAT) dataYmin <- min(dataYmin, min(data[, "Lnat"], na.rm = TRUE))
               dataYmax <- max(data[, "L010"], na.rm = TRUE)
               
-              # FIXED: this plot's y-axis OUTER BOUNDARY (this_yMinHr /
-              # this_yMaxHr) now comes from compute_auto_ylim() when
-              # plotAUTO_Y is TRUE, scaled to THIS site/season's actual
-              # data instead of the fixed yMinHr/yMaxHr constants used by
-              # every site regardless of how loud/quiet it actually is -
-              # see the "Y-axis auto-scaling" note in the CONFIG section
-              # at the top of this script. tempAxis (below) is a SEPARATE
-              # concept - the intermediate tick marks WITHIN the data
-              # range - and intentionally still operates on the raw,
-              # unpadded dataYmin/dataYmax regardless of this setting, so
-              # that logic did not need to change.
-              this_yMinHr <- if (plotAUTO_Y) compute_auto_ylim(dataYmin, dataYmax)[1] else yMinHr
-              this_yMaxHr <- if (plotAUTO_Y) compute_auto_ylim(dataYmin, dataYmax)[2] else yMaxHr
+              # This plot's y-axis OUTER BOUNDARY (this_yMinHr/this_yMaxHr)
+              # comes from compute_auto_ylim() when plotAUTO_Y is TRUE,
+              # instead of the fixed yMinHr/yMaxHr constants used by every
+              # site regardless of how loud/quiet it actually is. When
+              # plotAUTO_Y_scope is "global", this instead uses the single
+              # range already pre-computed across EVERY site and season in
+              # this run (global_spl_ylims$dba / $dbt) so every DBAvHR
+              # plot in the run shares one y-axis and every DBTvHR plot
+              # shares a separate one - falling back to this plot's own
+              # data if the global pre-pass didn't produce a usable range
+              # or if plotAUTO_Y_scope is "per_site". tempAxis (below) is
+              # a SEPARATE concept - the intermediate tick marks WITHIN
+              # the data range - and intentionally still operates on the
+              # raw, unpadded dataYmin/dataYmax regardless of this
+              # setting, so that logic did not need to change.
+              global_hr_ylim <- if (pType == 1) global_spl_ylims$dba else global_spl_ylims$dbt
+              use_global_hr <- plotAUTO_Y && plotAUTO_Y_scope == "global" && !is.null(global_hr_ylim)
+              this_yMinHr <- if (use_global_hr) global_hr_ylim[1] else if (plotAUTO_Y) compute_auto_ylim(dataYmin, dataYmax)[1] else yMinHr
+              this_yMaxHr <- if (use_global_hr) global_hr_ylim[2] else if (plotAUTO_Y) compute_auto_ylim(dataYmin, dataYmax)[2] else yMaxHr
               
               tempAxis <- if (ceiling(dataYmin/3)*3 < floor(dataYmax/3)*3) {
                 ta <- seq(ceiling(dataYmin/3)*3, floor(dataYmax/3)*3, by = 3)
@@ -2064,20 +2784,13 @@ for (r in seq_len(nrow(run_combos))) {
                        11.4,8.4,5.8,3.8,2.1,1.0,0.8,1.9,0.5,-1.5,-3.1,-4,-3.8,-1.8,2.5,
                        6.8,9.8,14.4,43.7,84.7)
           
-          # FIXED: this_yMinHz/this_yMaxHz (this plot's actual outer
-          # y-axis boundary) now comes from compute_auto_ylim() when
-          # plotAUTO_Y is TRUE, scaled to THIS site/season's day+night
-          # frequency-content data, instead of the fixed yMinHz/yMaxHz
-          # constants - see the "Y-axis auto-scaling" note in the CONFIG
-          # section. EVERY subsequent use of yMinHz/yMaxHz in this block
-          # (polygon fill, both axis() calls, the xLabPos/yLabPos legend
-          # box placement and all its nested rect/segment/text offsets,
-          # and the three annotation brackets below) has been renamed to
-          # this_yMinHz/this_yMaxHz accordingly - those offsets (e.g.
-          # "this_yMinHz+5.5") are all RELATIVE to the plot's own bounds
-          # and work identically regardless of whether those bounds came
-          # from auto-scaling or the fixed constants, so no other
-          # structural changes were needed in this block.
+          # When plotAUTO_Y_scope is "global", use the single
+          # frequency-content range pre-computed across every site/season
+          # in this run (global_spl_ylims$freq - see Section 9c) instead
+          # of this plot's own day+night data, so every SPLvFREQ plot in
+          # the run shares one y-axis range. Falls back to this plot's
+          # own data if the pre-pass didn't produce a usable range, or if
+          # plotAUTO_Y_scope is "per_site".
           if (hasDay && hasNight) {
             dataYmin <- min(min(dataDay[,"L090"],na.rm=TRUE), min(dataNight[,"L090"],na.rm=TRUE))
             dataYmax <- max(max(dataDay[,"L010"],na.rm=TRUE), max(dataNight[,"L010"],na.rm=TRUE))
@@ -2086,8 +2799,9 @@ for (r in seq_len(nrow(run_combos))) {
           } else {
             dataYmin <- min(dataNight[,"L090"],na.rm=TRUE); dataYmax <- max(dataNight[,"L010"],na.rm=TRUE)
           }
-          this_yMinHz <- if (plotAUTO_Y) compute_auto_ylim(dataYmin, dataYmax)[1] else yMinHz
-          this_yMaxHz <- if (plotAUTO_Y) compute_auto_ylim(dataYmin, dataYmax)[2] else yMaxHz
+          use_global_hz <- plotAUTO_Y && plotAUTO_Y_scope == "global" && !is.null(global_spl_ylims$freq)
+          this_yMinHz <- if (use_global_hz) global_spl_ylims$freq[1] else if (plotAUTO_Y) compute_auto_ylim(dataYmin, dataYmax)[1] else yMinHz
+          this_yMaxHz <- if (use_global_hz) global_spl_ylims$freq[2] else if (plotAUTO_Y) compute_auto_ylim(dataYmin, dataYmax)[2] else yMaxHz
           
           xLabPos <- 1; yLabPos <- this_yMinHz + 14
           if (hasDay) {
@@ -2283,6 +2997,25 @@ if (build_trends) {
     
     safe_name <- function(x) gsub("[^A-Za-z0-9_-]+", "_", x)
     
+    ## Normalizes a Site ID for GROUPING/matching purposes only (trim
+    ## whitespace, uppercase). Site codes should be a small, stable set,
+    ## but minor formatting drift between how a site's ID ended up written
+    ## in different season/year metrics files (stray leading/trailing
+    ## whitespace, inconsistent casing e.g. "NOCA007" vs "noca007") is
+    ## enough for R to treat the SAME physical site as several different
+    ## "sites" when combining trend data across years. That's exactly the
+    ## bug behind "trends plot one year per graph instead of one combined
+    ## multi-year graph": if a site's ID string differs even slightly
+    ## between two years, each year's data ends up grouped under its own
+    ## distinct (but visually identical) SiteID, so every per-site trend
+    ## loop below produces a separate, single-point "trend" per year
+    ## instead of one line connecting all years for that site. This
+    ## mirrors the normalization already used for Deployment Locations
+    ## matching in Section 9b (apply_deployment_locations()). Applied to
+    ## SiteID right after each CSV type is combined across folders, before
+    ## any grouping/filtering/plotting happens.
+    normalize_site_id <- function(x) toupper(trimws(as.character(x)))
+    
     combine_csvs_by_pattern <- function(pattern) {
       rows <- list()
       for (i in seq_len(nrow(trend_meta))) {
@@ -2325,6 +3058,11 @@ if (build_trends) {
     ## -- 1) ambfullsum: LA10/LA50/LAnat/LA90 x Day/Night, per site, per season --
     amb_trend <- combine_csvs_by_pattern("^ambfullsum_.*\\.csv$")
     if (!is.null(amb_trend) && all(c("SiteID","Time","LA10","LA50","LAnat","LA90") %in% names(amb_trend))) {
+      # Normalize SiteID BEFORE grouping/filtering - see
+      # normalize_site_id() definition above for why this is needed to
+      # combine a site's multiple years onto one trend line instead of
+      # scattering them into one-year-each separate plots.
+      amb_trend$SiteID <- normalize_site_id(amb_trend$SiteID)
       for (sea in seasons_present) {
         df_sea <- prep_season_subset(amb_trend, sea)
         if (is.null(df_sea)) next
@@ -2360,6 +3098,9 @@ if (build_trends) {
     if (!is.null(ta_trend) && all(c("SiteID","Frequency..Hz.") %in% names(ta_trend))) {
       names(ta_trend)[names(ta_trend) == "Frequency..Hz."] <- "FreqBand"
       value_cols <- grep("^X?35|^X?45|^X?52|^X?60", names(ta_trend), value = TRUE)
+      # See normalize_site_id() note above (ambfullsum section) - same
+      # fix applied here.
+      ta_trend$SiteID <- normalize_site_id(ta_trend$SiteID)
       
       for (sea in seasons_present) {
         df_sea <- prep_season_subset(ta_trend, sea)
@@ -2397,6 +3138,9 @@ if (build_trends) {
     ## -- 3) impactlisteningarea: Impact (dB) and LAR (%) as separate plots, per season --
     imp_trend <- combine_csvs_by_pattern("^impactlisteningarea_.*\\.csv$")
     if (!is.null(imp_trend) && all(c("SiteID","DayImpact","NightImpact","AllImpact","DayLAR","NightLAR","AllLAR") %in% names(imp_trend))) {
+      # See normalize_site_id() note above (ambfullsum section) - same
+      # fix applied here.
+      imp_trend$SiteID <- normalize_site_id(imp_trend$SiteID)
       for (sea in seasons_present) {
         df_sea <- prep_season_subset(imp_trend, sea)
         if (is.null(df_sea)) next
@@ -2439,6 +3183,9 @@ if (build_trends) {
     if (!is.null(nfi_trend) && all(c("Percentile","SiteID") %in% names(nfi_trend))) {
       hour_cols <- grep("^X?[0-2][0-9]h?$", names(nfi_trend), value = TRUE)
       nfi_trend$DailyMean <- rowMeans(nfi_trend[, hour_cols], na.rm = TRUE)
+      # See normalize_site_id() note above (ambfullsum section) - same
+      # fix applied here.
+      nfi_trend$SiteID <- normalize_site_id(nfi_trend$SiteID)
       
       for (sea in seasons_present) {
         df_sea <- prep_season_subset(nfi_trend, sea)
@@ -2469,6 +3216,9 @@ if (build_trends) {
       ecl_trend <- ecl_trend %>%
         mutate(AvgCount = rowMeans(cbind(Day_Count, Night_Count), na.rm = TRUE),
                AvgLength = rowMeans(cbind(Day_Length, Night_Length), na.rm = TRUE))
+      # See normalize_site_id() note above (ambfullsum section) - same
+      # fix applied here.
+      ecl_trend$SiteID <- normalize_site_id(ecl_trend$SiteID)
       
       for (sea in seasons_present) {
         df_sea <- prep_season_subset(ecl_trend, sea)
